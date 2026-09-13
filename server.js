@@ -492,4 +492,1299 @@ function localAIReply(message, db) {
     return "Active projects:\n" + projects.map(p => "• " + p.title).join("\n") + "\n\nYou can start or join projects from the Projects page.";
   }
   if (/help|what can you do/.test(t)) {
-    return "I
+    return "I can help with:\n• Explaining GLOBAL and the mission\n• Finding problems, ideas and projects on the platform\n• Guidance on energy, agriculture and education in Nigeria\n• How to contribute\n\nFor richer answers, set ANTHROPIC_API_KEY on the server to connect full Claude-powered GLOBAL AI.";
+  }
+  return "I am running in local mode right now.\n\nI can search the platform for problems, ideas and projects, explain the GLOBAL mission, and give guidance on Nigerian focus areas (power, education, agriculture).\n\nTry: \"show me problems about electricity\" or \"how do I start contributing?\"\n\nTo enable full online GLOBAL AI, add ANTHROPIC_API_KEY to the server environment.";
+}
+
+
+// ======================
+// GLOBAL AI (Claude-powered chat)
+// ======================
+// Each user's conversation is stored under their userId, so it picks up
+// where they left off next time — this is real, persistent memory of
+// their own chat history. It does not retrain or change the underlying
+// Claude model itself; that's not something the API supports.
+const AI_SYSTEM_PROMPT =
+  "You are GLOBAL AI, the assistant inside GLOBAL Organisation — a Nigerian " +
+  "technology and innovation platform for ideas, problems, research, projects, " +
+  "teams and opportunities. Be genuinely useful: help people think through " +
+  "problems, sharpen ideas, find relevant sections of GLOBAL, and connect their " +
+  "goals to real next steps. Keep answers clear and concise.";
+
+// Keep only the most recent messages per user so requests stay small
+// and cheap as conversations grow.
+const AI_HISTORY_LIMIT = 20;
+
+app.get("/api/ai/history/:userId", async (req, res) => {
+  const db = await loadDB();
+  const history = (db.aiChats && db.aiChats[req.params.userId]) || [];
+  res.json({ success: true, history });
+});
+
+app.post("/api/ai/chat", async (req, res) => {
+  try {
+    // Online Claude when key is present; otherwise use built-in local brain
+    // so the platform still works without any paid API.
+    if (!ANTHROPIC_API_KEY) {
+      const { userId, message } = req.body;
+      if (!userId || !message || !message.trim()) {
+        return res.status(400).json({ success: false, error: "A message is required." });
+      }
+      const db = await loadDB();
+      if (!db.aiChats) db.aiChats = {};
+      const history = db.aiChats[userId] || [];
+      history.push({ role: "user", content: message.trim(), timestamp: new Date().toISOString() });
+
+      const replyText = localAIReply(message.trim(), db);
+      history.push({ role: "assistant", content: replyText, timestamp: new Date().toISOString() });
+      db.aiChats[userId] = history.slice(-AI_HISTORY_LIMIT * 2);
+      await saveDB(db);
+      return res.json({ success: true, reply: replyText, provider: "local" });
+    }
+
+    const { userId, message } = req.body;
+    if (!userId || !message || !message.trim()) {
+      return res.status(400).json({ success: false, error: "A message is required." });
+    }
+
+    const db = await loadDB();
+    if (!db.aiChats) db.aiChats = {};
+    const history = db.aiChats[userId] || [];
+
+    history.push({ role: "user", content: message.trim(), timestamp: new Date().toISOString() });
+
+    const apiMessages = history
+      .slice(-AI_HISTORY_LIMIT)
+      .map(m => ({ role: m.role, content: m.content }));
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-5",
+        max_tokens: 1024,
+        system: AI_SYSTEM_PROMPT,
+        messages: apiMessages
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Claude API error:", data);
+      return res.status(502).json({ success: false, error: "GLOBAL AI could not respond right now." });
+    }
+
+    const replyText = (data.content || [])
+      .filter(block => block.type === "text")
+      .map(block => block.text)
+      .join("\n")
+      .trim() || "I couldn't come up with a reply to that — try rephrasing?";
+
+    history.push({ role: "assistant", content: replyText, timestamp: new Date().toISOString() });
+    db.aiChats[userId] = history.slice(-AI_HISTORY_LIMIT * 2);
+    await saveDB(db);
+
+    res.json({ success: true, reply: replyText });
+  } catch (err) {
+    console.error("GLOBAL AI error:", err);
+    res.status(500).json({ success: false, error: "GLOBAL AI could not respond right now." });
+  }
+});
+
+// ======================
+// OPPORTUNITIES
+// ======================
+app.get("/api/opportunities", async (req, res) => {
+  const db = await loadDB();
+  const now = Date.now();
+  const opps = (db.opportunities || []).slice().sort((a, b) => {
+    const aFeatured = a.featured && a.featuredUntil && new Date(a.featuredUntil).getTime() > now;
+    const bFeatured = b.featured && b.featuredUntil && new Date(b.featuredUntil).getTime() > now;
+    if (aFeatured && !bFeatured) return -1;
+    if (!aFeatured && bFeatured) return 1;
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+  res.json({ success: true, opportunities: opps });
+});
+
+app.post("/api/opportunities", async (req, res) => {
+  try {
+    const { title, organization, description, type, location, deadline, link, submittedBy } = req.body;
+    if (!title || !description) {
+      return res.status(400).json({ success: false, error: "Title and description are required." });
+    }
+
+    const db = await loadDB();
+    const newOpp = {
+      id: createId("OPP"),
+      title: title.trim(),
+      organization: (organization || "").trim(),
+      description: description.trim(),
+      type: type || "Other",
+      location: location || "Remote / Global",
+      deadline: deadline || null,
+      link: link || null,
+      submittedBy: submittedBy || null,
+      createdAt: new Date().toISOString(),
+      views: 0,
+      reports: [],
+      featured: false,
+      featuredUntil: null
+    };
+
+    db.opportunities.unshift(newOpp);
+    await saveDB(db);
+    res.status(201).json({ success: true, opportunity: newOpp });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not create opportunity." });
+  }
+});
+
+// ======================
+// FEATURED OPPORTUNITIES (Paystack)
+// ======================
+// Step 1: start a payment. We decide the price here (from FEATURE_PRICING),
+// never from anything the browser sends, so it can't be tampered with.
+app.post("/api/payments/initialize-feature", async (req, res) => {
+  try {
+    if (!PAYSTACK_SECRET_KEY) {
+      return res.status(503).json({ success: false, error: "Payments are not connected yet." });
+    }
+
+    const { opportunityId, email, days } = req.body;
+    const durationDays = Number(days);
+    const amountNaira = FEATURE_PRICING[durationDays];
+
+    if (!opportunityId || !email || !amountNaira) {
+      return res.status(400).json({ success: false, error: "A valid opportunity, email, and duration are required." });
+    }
+
+    const db = await loadDB();
+    const opp = (db.opportunities || []).find(o => o.id === opportunityId);
+    if (!opp) {
+      return res.status(404).json({ success: false, error: "Opportunity not found." });
+    }
+
+    const reference = createId("PAY");
+
+    const paystackRes = await fetch("https://api.paystack.co/transaction/initialize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + PAYSTACK_SECRET_KEY
+      },
+      body: JSON.stringify({
+        email,
+        amount: amountNaira * 100, // Paystack expects kobo
+        reference,
+        callback_url: (req.headers.origin || "") + "/opportunities.html",
+        metadata: { opportunityId, days: durationDays }
+      })
+    });
+
+    const data = await paystackRes.json();
+
+    if (!paystackRes.ok || !data.status) {
+      console.error("Paystack initialize error:", data);
+      return res.status(502).json({ success: false, error: "Could not start payment." });
+    }
+
+    res.json({ success: true, authorizationUrl: data.data.authorization_url, reference });
+  } catch (err) {
+    console.error("Payment initialize error:", err);
+    res.status(500).json({ success: false, error: "Could not start payment." });
+  }
+});
+
+// Step 2: after Paystack redirects the user back, verify the payment
+// server-side before marking anything as featured. Never trust the
+// redirect alone — always confirm with Paystack directly.
+app.get("/api/payments/verify/:reference", async (req, res) => {
+  try {
+    if (!PAYSTACK_SECRET_KEY) {
+      return res.status(503).json({ success: false, error: "Payments are not connected yet." });
+    }
+
+    const paystackRes = await fetch(
+      "https://api.paystack.co/transaction/verify/" + encodeURIComponent(req.params.reference),
+      { headers: { "Authorization": "Bearer " + PAYSTACK_SECRET_KEY } }
+    );
+    const data = await paystackRes.json();
+
+    if (!paystackRes.ok || !data.status || data.data.status !== "success") {
+      return res.status(400).json({ success: false, error: "Payment was not successful." });
+    }
+
+    const { opportunityId, days } = data.data.metadata || {};
+    const expectedAmount = FEATURE_PRICING[Number(days)];
+
+    // Confirm the amount actually paid matches a real price we set —
+    // guards against a tampered or replayed reference.
+    if (!expectedAmount || data.data.amount !== expectedAmount * 100) {
+      return res.status(400).json({ success: false, error: "Payment amount did not match." });
+    }
+
+    const db = await loadDB();
+    const opp = (db.opportunities || []).find(o => o.id === opportunityId);
+    if (!opp) {
+      return res.status(404).json({ success: false, error: "Opportunity not found." });
+    }
+
+    const featuredUntil = new Date(Date.now() + Number(days) * 24 * 60 * 60 * 1000).toISOString();
+    opp.featured = true;
+    opp.featuredUntil = featuredUntil;
+    await saveDB(db);
+
+    res.json({ success: true, opportunity: opp });
+  } catch (err) {
+    console.error("Payment verify error:", err);
+    res.status(500).json({ success: false, error: "Could not verify payment." });
+  }
+});
+
+// Report a listing as stale, wrong, or a scam. One report per user, per listing.
+app.post("/api/opportunities/:oppId/report", async (req, res) => {
+  try {
+    const { userId, reason } = req.body;
+    if (!userId) return res.status(400).json({ success: false, error: "userId required." });
+
+    const db = await loadDB();
+    const opp = db.opportunities.find(o => o.id === req.params.oppId);
+    if (!opp) return res.status(404).json({ success: false, error: "Opportunity not found." });
+
+    opp.reports = opp.reports || [];
+
+    if (opp.reports.some(r => r.userId === userId)) {
+      return res.json({ success: true, message: "Already reported by this user.", opportunity: opp });
+    }
+
+    opp.reports.push({
+      userId,
+      reason: (reason || "").trim().slice(0, 300) || "No reason given",
+      createdAt: new Date().toISOString()
+    });
+
+    await saveDB(db);
+    res.json({ success: true, opportunity: opp });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not submit report." });
+  }
+});
+
+// ======================
+// IDEAS (online)
+// ======================
+app.get("/api/ideas", async (req, res) => {
+  const { helpNeeded, category } = req.query;
+  const db = await loadDB();
+  let ideas = db.ideas || [];
+
+  if (helpNeeded) {
+    ideas = ideas.filter(
+      idea => Array.isArray(idea.helpNeeded) && idea.helpNeeded.includes(helpNeeded)
+    );
+  }
+
+  if (category) {
+    ideas = ideas.filter(idea => idea.category === category);
+  }
+
+  res.json({ success: true, ideas });
+});
+
+app.post("/api/ideas", async (req, res) => {
+  try {
+    const { title, content, category, authorId, authorName, helpNeeded } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ success: false, error: "Title and content are required." });
+    }
+
+    // helpNeeded is an optional list of tags like ["Developer", "Funding"]
+    // describing what kind of collaborator the idea's author is looking for.
+    const cleanHelpNeeded = Array.isArray(helpNeeded)
+      ? helpNeeded.filter(tag => typeof tag === "string" && tag.trim()).map(tag => tag.trim()).slice(0, 10)
+      : [];
+
+    const db = await loadDB();
+    const newIdea = {
+      id: createId("IDEA"),
+      title: title.trim(),
+      content: content.trim(),
+      category: category || "General",
+      authorId: authorId || null,
+      authorName: authorName || "Anonymous",
+      helpNeeded: cleanHelpNeeded,
+      createdAt: new Date().toISOString(),
+      likes: 0
+    };
+
+    db.ideas.unshift(newIdea);
+    await saveDB(db);
+    res.status(201).json({ success: true, idea: newIdea });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not create idea." });
+  }
+});
+
+// ======================
+// PROBLEMS
+// ======================
+app.get("/api/problems", async (req, res) => {
+  const { category, region } = req.query;
+  const db = await loadDB();
+  let problems = db.problems || [];
+  if (category) problems = problems.filter(p => p.category === category);
+  if (region) problems = problems.filter(p => (p.region || "").toLowerCase().includes(region.toLowerCase()));
+  res.json({ success: true, problems });
+});
+
+app.post("/api/problems", async (req, res) => {
+  try {
+    const { title, content, category, region, authorId, authorName } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ success: false, error: "Title and content are required." });
+    }
+    const db = await loadDB();
+    const newProblem = {
+      id: createId("PROB"),
+      title: title.trim(),
+      content: content.trim(),
+      category: category || "General",
+      region: region || "Global",
+      authorId: authorId || null,
+      authorName: authorName || "Anonymous",
+      createdAt: new Date().toISOString(),
+      likes: 0,
+      solutions: 0
+    };
+    db.problems.unshift(newProblem);
+    await saveDB(db);
+    res.status(201).json({ success: true, problem: newProblem });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not create problem." });
+  }
+});
+
+// ======================
+// PROJECTS
+// ======================
+app.get("/api/projects", async (req, res) => {
+  const { status, category } = req.query;
+  const db = await loadDB();
+  let projects = db.projects || [];
+  if (status) projects = projects.filter(p => p.status === status);
+  if (category) projects = projects.filter(p => p.category === category);
+  res.json({ success: true, projects });
+});
+
+app.post("/api/projects", async (req, res) => {
+  try {
+    const { title, content, category, status, authorId, authorName, lookingFor } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ success: false, error: "Title and content are required." });
+    }
+    const cleanLookingFor = Array.isArray(lookingFor)
+      ? lookingFor.filter(t => typeof t === "string" && t.trim()).map(t => t.trim()).slice(0, 10)
+      : [];
+    const db = await loadDB();
+    const newProject = {
+      id: createId("PROJ"),
+      title: title.trim(),
+      content: content.trim(),
+      category: category || "General",
+      status: status || "Ideation",
+      authorId: authorId || null,
+      authorName: authorName || "Anonymous",
+      lookingFor: cleanLookingFor,
+      createdAt: new Date().toISOString(),
+      members: 1,
+      likes: 0
+    };
+    db.projects.unshift(newProject);
+    await saveDB(db);
+    res.status(201).json({ success: true, project: newProject });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not create project." });
+  }
+});
+
+// ======================
+// MESSAGES (online)
+// ======================
+app.get("/api/messages", async (req, res) => {
+  const { userId } = req.query;
+  const db = await loadDB();
+  let messages = db.messages || [];
+
+  if (userId) {
+    messages = messages.filter(
+      m => m.fromUserId === userId || m.toUserId === userId
+    );
+  }
+
+  // Newest first
+  messages = messages.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ success: true, messages });
+});
+
+app.post("/api/messages", async (req, res) => {
+  try {
+    const { fromUserId, fromName, toUserId, toName, text } = req.body;
+    if (!fromUserId || !toUserId || !text || !text.trim()) {
+      return res.status(400).json({ success: false, error: "fromUserId, toUserId and text are required." });
+    }
+
+    const db = await loadDB();
+    const newMsg = {
+      id: createId("MSG"),
+      fromUserId,
+      fromName: fromName || "User",
+      toUserId,
+      toName: toName || "User",
+      text: text.trim().slice(0, 2000),
+      createdAt: new Date().toISOString(),
+      read: false
+    };
+
+    db.messages.push(newMsg);
+
+    // Also create a notification for the recipient
+    db.notifications.push({
+      id: createId("NOTIF"),
+      userId: toUserId,
+      type: "message",
+      title: "New message",
+      body: `${fromName || "Someone"} sent you a message`,
+      relatedId: newMsg.id,
+      createdAt: new Date().toISOString(),
+      read: false
+    });
+
+    await saveDB(db);
+    res.status(201).json({ success: true, message: newMsg });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not send message." });
+  }
+});
+
+// ======================
+// TEAMS (online)
+// ======================
+app.get("/api/teams", async (req, res) => {
+  const db = await loadDB();
+  res.json({ success: true, teams: db.teams || [] });
+});
+
+app.post("/api/teams", async (req, res) => {
+  try {
+    const { name, description, creatorId, creatorName } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: "Team name is required." });
+    }
+
+    const db = await loadDB();
+    const newTeam = {
+      id: createId("TEAM"),
+      name: name.trim(),
+      description: (description || "").trim(),
+      creatorId: creatorId || null,
+      creatorName: creatorName || "Unknown",
+      members: creatorId ? [creatorId] : [],
+      createdAt: new Date().toISOString()
+    };
+
+    db.teams.unshift(newTeam);
+    await saveDB(db);
+    res.status(201).json({ success: true, team: newTeam });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not create team." });
+  }
+});
+
+app.post("/api/teams/:teamId/join", async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ success: false, error: "userId required." });
+
+    const db = await loadDB();
+    const team = db.teams.find(t => t.id === req.params.teamId);
+    if (!team) return res.status(404).json({ success: false, error: "Team not found." });
+
+    if (!team.members.includes(userId)) {
+      team.members.push(userId);
+      await saveDB(db);
+    }
+
+    res.json({ success: true, team });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not join team." });
+  }
+});
+
+// ======================
+// MENTORSHIP
+// ======================
+
+// List everyone who has opted in as a mentor
+app.get("/api/mentors", async (req, res) => {
+  const db = await loadDB();
+  const mentors = (db.users || [])
+    .filter(u => u.isMentor)
+    .map(({ passwordHash, ...u }) => u);
+  res.json({ success: true, mentors });
+});
+
+// List mentorship requests involving a user, either as mentor or mentee
+app.get("/api/mentorships", async (req, res) => {
+  const { userId, role } = req.query;
+  const db = await loadDB();
+  let items = db.mentorships || [];
+  if (userId) {
+    items = items.filter(m =>
+      role === "mentor" ? m.mentorId === userId :
+      role === "mentee" ? m.menteeId === userId :
+      m.mentorId === userId || m.menteeId === userId
+    );
+  }
+  items = items.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ success: true, mentorships: items });
+});
+
+// Request mentorship from a mentor
+app.post("/api/mentorships", async (req, res) => {
+  try {
+    const { mentorId, mentorName, menteeId, menteeName, message } = req.body;
+    if (!mentorId || !menteeId) {
+      return res.status(400).json({ success: false, error: "mentorId and menteeId are required." });
+    }
+    if (mentorId === menteeId) {
+      return res.status(400).json({ success: false, error: "You can't request mentorship from yourself." });
+    }
+
+    const db = await loadDB();
+    const mentor = db.users.find(u => u.userId === mentorId);
+    if (!mentor || !mentor.isMentor) {
+      return res.status(404).json({ success: false, error: "Mentor not found." });
+    }
+
+    const existing = (db.mentorships || []).find(
+      m => m.mentorId === mentorId && m.menteeId === menteeId && m.status === "pending"
+    );
+    if (existing) {
+      return res.status(409).json({ success: false, error: "You already have a pending request with this mentor." });
+    }
+
+    const newRequest = {
+      id: createId("MENTOR"),
+      mentorId,
+      mentorName: mentorName || mentor.fullName || mentor.username,
+      menteeId,
+      menteeName: menteeName || "A GLOBAL member",
+      message: (message || "").trim().slice(0, 1000),
+      status: "pending", // pending | accepted | declined
+      createdAt: new Date().toISOString(),
+      respondedAt: null
+    };
+
+    db.mentorships.unshift(newRequest);
+
+    db.notifications.push({
+      id: createId("NOTIF"),
+      userId: mentorId,
+      type: "mentorship_request",
+      title: "New mentorship request",
+      body: `${newRequest.menteeName} would like you as a mentor`,
+      relatedId: newRequest.id,
+      createdAt: new Date().toISOString(),
+      read: false
+    });
+
+    await saveDB(db);
+    res.status(201).json({ success: true, mentorship: newRequest });
+  } catch (err) {
+    console.error("Mentorship request error:", err);
+    res.status(500).json({ success: false, error: "Could not send mentorship request." });
+  }
+});
+
+// Mentor accepts or declines a request
+app.post("/api/mentorships/:id/respond", async (req, res) => {
+  try {
+    const { status } = req.body; // "accepted" | "declined"
+    if (!["accepted", "declined"].includes(status)) {
+      return res.status(400).json({ success: false, error: "status must be 'accepted' or 'declined'." });
+    }
+
+    const db = await loadDB();
+    const request = (db.mentorships || []).find(m => m.id === req.params.id);
+    if (!request) return res.status(404).json({ success: false, error: "Request not found." });
+
+    request.status = status;
+    request.respondedAt = new Date().toISOString();
+
+    db.notifications.push({
+      id: createId("NOTIF"),
+      userId: request.menteeId,
+      type: "mentorship_response",
+      title: status === "accepted" ? "Mentorship accepted!" : "Mentorship request declined",
+      body: status === "accepted"
+        ? `${request.mentorName} accepted your mentorship request`
+        : `${request.mentorName} isn't able to take this on right now`,
+      relatedId: request.id,
+      createdAt: new Date().toISOString(),
+      read: false
+    });
+
+    await saveDB(db);
+    res.json({ success: true, mentorship: request });
+  } catch (err) {
+    console.error("Mentorship respond error:", err);
+    res.status(500).json({ success: false, error: "Could not update request." });
+  }
+});
+
+// ======================
+// POSTS (Home feed)
+// ======================
+
+// List posts for the Home feed, newest first
+app.get("/api/posts", async (req, res) => {
+  const db = await loadDB();
+  let posts = (db.posts || [])
+    .slice()
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const category = String(req.query.category || "all").toLowerCase();
+  if (category && category !== "all" && category !== "latest" && category !== "following") {
+    posts = posts.filter(p => String(p.category || "general").toLowerCase() === category);
+  }
+
+  const limit = Math.min(Math.max(parseInt(req.query.limit || "10", 10) || 10, 1), 50);
+  const offset = Math.max(parseInt(req.query.offset || "0", 10) || 0, 0);
+  const total = posts.length;
+  const page = posts.slice(offset, offset + limit);
+  const hasMore = offset + limit < total;
+
+  res.json({
+    success: true,
+    posts: page,
+    total,
+    limit,
+    offset,
+    hasMore,
+    nextOffset: hasMore ? offset + limit : null
+  });
+});
+
+// Create a new post
+app.post("/api/posts", async (req, res) => {
+  try {
+    const { authorId, authorName, authorAvatar, text, imageBase64, videoBase64 } = req.body;
+
+    if (!authorId || (!text || !String(text).trim()) && !imageBase64 && !videoBase64) {
+      return res.status(400).json({
+        success: false,
+        error: "Write something or choose an image before posting."
+      });
+    }
+
+    const db = await loadDB();
+
+    const postId = createId("POST");
+    // Optional post image.
+    if (imageBase64 && videoBase64) {
+      return res.status(400).json({
+        success: false,
+        error: "Choose a photo or a video, not both in one post."
+      });
+    }
+
+    let imageUrl = null;
+    let videoUrl = null;
+
+    if (imageBase64) {
+      const match = String(imageBase64).match(
+        /^data:image\/(png|jpeg|jpg|gif|webp);base64,(.+)$/
+      );
+
+      if (!match) {
+        return res.status(400).json({
+          success: false,
+          error: "Unsupported image. Use PNG, JPG, GIF, or WEBP."
+        });
+      }
+
+      const ext = match[1] === "jpeg" ? "jpg" : match[1];
+      const buffer = Buffer.from(match[2], "base64");
+
+      if (buffer.length > 5 * 1024 * 1024) {
+        return res.status(400).json({
+          success: false,
+          error: "Image is too large. Maximum size is 5MB."
+        });
+      }
+
+      const fileName = `${postId}.${ext}`;
+      fs.writeFileSync(
+        path.join(POST_IMAGE_DIR, fileName),
+        buffer
+      );
+
+      imageUrl = `/uploads/posts/${fileName}`;
+    }
+
+    // Optional post video. Browser/mobile camera uploads are accepted.
+    if (videoBase64) {
+      const match = String(videoBase64).match(
+        /^data:video\/(mp4|webm|ogg|quicktime|x-m4v);base64,(.+)$/i
+      );
+
+      if (!match) {
+        return res.status(400).json({
+          success: false,
+          error: "Unsupported video. Use MP4, WEBM, OGG, or MOV-compatible video."
+        });
+      }
+
+      const mime = match[1].toLowerCase();
+      const extMap = { mp4: "mp4", webm: "webm", ogg: "ogv", quicktime: "mov", "x-m4v": "m4v" };
+      const ext = extMap[mime] || "mp4";
+      const buffer = Buffer.from(match[2], "base64");
+
+      if (buffer.length > 20 * 1024 * 1024) {
+        return res.status(400).json({
+          success: false,
+          error: "Video is too large. Maximum size is 20MB."
+        });
+      }
+
+      const fileName = `${postId}.${ext}`;
+      fs.writeFileSync(
+        path.join(POST_VIDEO_DIR, fileName),
+        buffer
+      );
+
+      videoUrl = `/uploads/videos/${fileName}`;
+    }
+
+    const newPost = {
+      id: postId,
+      authorId,
+      authorName: authorName || "Someone",
+      authorAvatar: authorAvatar || null,
+      username: String(req.body.username || "builder").trim().replace(/^@/, "") || "builder",
+      text: String(text || "").trim().slice(0, 3000),
+      imageUrl,
+      videoUrl,
+      category: String(req.body.category || "general").trim().toLowerCase(),
+      tags: Array.isArray(req.body.tags) ? req.body.tags.slice(0, 10) : [],
+      createdAt: new Date().toISOString(),
+      likes: [],
+      comments: []
+    };
+
+    db.posts.unshift(newPost);
+
+    if (!(await saveDB(db))) {
+      return res.status(500).json({
+        success: false,
+        error: "Could not save post."
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      post: newPost
+    });
+
+  } catch (err) {
+    console.error("Create post error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Could not create post."
+    });
+  }
+});
+
+// Like / unlike a post (toggle)
+app.post("/api/posts/:postId/like", async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ success: false, error: "userId required." });
+
+    const db = await loadDB();
+    const post = db.posts.find(p => p.id === req.params.postId);
+    if (!post) return res.status(404).json({ success: false, error: "Post not found." });
+
+    post.likes = post.likes || [];
+    const alreadyLiked = post.likes.includes(userId);
+
+    if (alreadyLiked) {
+      post.likes = post.likes.filter(id => id !== userId);
+    } else {
+      post.likes.push(userId);
+    }
+
+    await saveDB(db);
+    res.json({ success: true, post, liked: !alreadyLiked });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not update like." });
+  }
+});
+
+// Add a comment to a post
+app.post("/api/posts/:postId/comment", async (req, res) => {
+  try {
+    const { authorId, authorName, text } = req.body;
+    if (!authorId || !text || !text.trim()) {
+      return res.status(400).json({ success: false, error: "authorId and text are required." });
+    }
+
+    const db = await loadDB();
+    const post = db.posts.find(p => p.id === req.params.postId);
+    if (!post) return res.status(404).json({ success: false, error: "Post not found." });
+
+    const comment = {
+      id: createId("CMT"),
+      authorId,
+      authorName: authorName || "Someone",
+      text: text.trim().slice(0, 1000),
+      createdAt: new Date().toISOString()
+    };
+
+    post.comments = post.comments || [];
+    post.comments.push(comment);
+
+    await saveDB(db);
+    res.status(201).json({ success: true, comment, post });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not add comment." });
+  }
+});
+
+// ======================
+// NOTIFICATIONS
+// ======================
+app.get("/api/notifications", async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ success: false, error: "userId required." });
+
+  const db = await loadDB();
+  const notifs = (db.notifications || [])
+    .filter(n => n.userId === userId)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  res.json({ success: true, notifications: notifs });
+});
+
+app.post("/api/notifications/read", async (req, res) => {
+  try {
+    const { userId, notificationId } = req.body;
+    const db = await loadDB();
+
+    if (notificationId) {
+      const n = db.notifications.find(x => x.id === notificationId && x.userId === userId);
+      if (n) n.read = true;
+    } else if (userId) {
+      db.notifications.forEach(n => {
+        if (n.userId === userId) n.read = true;
+      });
+    }
+
+    await saveDB(db);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not update notifications." });
+  }
+});
+
+// ======================
+// SAVED RESEARCH (online)
+// ======================
+app.get("/api/saved-research", async (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ success: false, error: "userId required." });
+
+  const db = await loadDB();
+  const items = (db.savedResearch || []).filter(r => r.userId === userId);
+  res.json({ success: true, items });
+});
+
+app.post("/api/saved-research", async (req, res) => {
+  try {
+    const { userId, research } = req.body;
+    if (!userId || !research) {
+      return res.status(400).json({ success: false, error: "userId and research are required." });
+    }
+
+    const db = await loadDB();
+    const exists = (db.savedResearch || []).some(
+      r => r.userId === userId && r.title === research.title
+    );
+
+    if (exists) {
+      return res.json({ success: true, message: "Already saved." });
+    }
+
+    db.savedResearch.push({
+      id: createId("RES"),
+      userId,
+      ...research,
+      savedAt: new Date().toISOString()
+    });
+
+    await saveDB(db);
+    res.status(201).json({ success: true, message: "Research saved." });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not save research." });
+  }
+});
+
+// ======================
+// RESEARCH (OpenAlex)
+// ======================
+app.get("/api/research", async (req, res) => {
+  try {
+    const query = String(req.query.q || "").trim();
+    const page = Math.max(parseInt(req.query.page || "1"), 1);
+
+    if (!query) {
+      return res.status(400).json({ success: false, error: "Please provide a research query." });
+    }
+
+    const url =
+      "https://api.openalex.org/works" +
+      "?search=" + encodeURIComponent(query) +
+      "&page=" + page +
+      "&per-page=10" +
+      "&sort=relevance_score:desc";
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`OpenAlex returned ${response.status}`);
+
+    const data = await response.json();
+
+    const results = (data.results || []).map((item) => {
+      const authors = (item.authorships || [])
+        .slice(0, 5)
+        .map((author) => author.author?.display_name)
+        .filter(Boolean);
+
+      return {
+        id: item.id || null,
+        title: item.display_name || "Untitled research",
+        publicationDate: item.publication_date || null,
+        year: item.publication_year || null,
+        type: item.type || null,
+        authors,
+        journal: item.primary_location?.source?.display_name || null,
+        doi: item.doi || null,
+        abstract: getAbstract(item),
+        citedBy: item.cited_by_count || 0,
+        openAccess: item.open_access?.is_oa || false,
+        sourceUrl: item.primary_location?.landing_page_url || item.doi || item.id || null
+      };
+    });
+
+    res.json({
+      success: true,
+      query,
+      page,
+      totalResults: data.meta?.count || results.length,
+      results
+    });
+  } catch (error) {
+    console.error("GLOBAL Research Error:", error);
+    res.status(500).json({
+      success: false,
+      error: "GLOBAL Research could not retrieve research results.",
+      details: error.message
+    });
+  }
+});
+
+function getAbstract(work) {
+  const invertedIndex = work?.abstract_inverted_index;
+  if (!invertedIndex) return "Abstract not available.";
+  const words = [];
+  for (const [word, positions] of Object.entries(invertedIndex)) {
+    for (const position of positions) {
+      words[position] = word;
+    }
+  }
+  return words.filter(Boolean).join(" ");
+}
+
+app.get("/api/categories", async (req, res) => {
+  res.json({
+    success: true,
+    categories: [
+      { id: "technology", name: "Technology & AI", query: "artificial intelligence technology" },
+      { id: "medicine", name: "Medicine & Drugs", query: "medicine drug research" },
+      { id: "biotechnology", name: "Biotechnology", query: "biotechnology research" },
+      { id: "energy", name: "Energy", query: "energy battery renewable energy" },
+      { id: "agriculture", name: "Agriculture", query: "agriculture food technology" },
+      { id: "climate", name: "Climate & Environment", query: "climate environmental science" },
+      { id: "space", name: "Space & Astronomy", query: "space astronomy research" },
+      { id: "engineering", name: "Engineering", query: "engineering research" },
+      { id: "health", name: "Health & Human Science", query: "health human science research" },
+      { id: "science", name: "General Science", query: "scientific research" }
+    ]
+  });
+});
+
+// ======================
+// START
+// ======================
+
+
+// ======================
+// SEARCH
+// ======================
+app.get("/api/search", async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim().toLowerCase();
+    if (!q || q.length < 2) {
+      return res.json({ success: true, results: [], query: q });
+    }
+    const db = await loadDB();
+    const results = [];
+    const score = (text) => {
+      if (!text) return 0;
+      const t = String(text).toLowerCase();
+      let s = 0;
+      q.split(/\s+/).forEach(w => { if (w.length > 1 && t.includes(w)) s += 1; });
+      return s;
+    };
+    (db.problems || []).forEach(p => {
+      const s = score((p.title || "") + " " + (p.description || "") + " " + (p.category || ""));
+      if (s) results.push({ type: "problem", score: s, id: p.id, title: p.title, description: (p.description || "").slice(0, 200) });
+    });
+    (db.ideas || []).forEach(i => {
+      const s = score((i.title || "") + " " + (i.content || "") + " " + (i.category || ""));
+      if (s) results.push({ type: "idea", score: s, id: i.id, title: i.title, description: (i.content || "").slice(0, 200) });
+    });
+    (db.projects || []).forEach(p => {
+      const s = score((p.title || "") + " " + (p.description || ""));
+      if (s) results.push({ type: "project", score: s, id: p.id, title: p.title, description: (p.description || "").slice(0, 200) });
+    });
+    (db.opportunities || []).forEach(o => {
+      const s = score((o.title || "") + " " + (o.description || ""));
+      if (s) results.push({ type: "opportunity", score: s, id: o.id, title: o.title, description: (o.description || "").slice(0, 200) });
+    });
+    (db.teams || []).forEach(t => {
+      const s = score((t.name || "") + " " + (t.description || ""));
+      if (s) results.push({ type: "team", score: s, id: t.id, title: t.name, description: (t.description || "").slice(0, 200) });
+    });
+    (db.users || []).forEach(u => {
+      const s = score((u.fullName || "") + " " + (u.username || "") + " " + (u.bio || ""));
+      if (s) results.push({ type: "person", score: s, id: u.userId, title: u.fullName || u.username, description: u.bio || u.location || "" });
+    });
+    results.sort((a, b) => b.score - a.score);
+    res.json({ success: true, query: q, results: results.slice(0, 30) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Search failed." });
+  }
+});
+
+// ======================
+// REPORTS & MODERATION
+// ======================
+// Anyone logged in can report content. Admins (isAdmin flag) can review.
+
+app.post("/api/report", async (req, res) => {
+  try {
+    const { targetType, targetId, reporterId, reason } = req.body;
+    const allowed = ["opportunity", "idea", "problem", "project", "post", "user", "team"];
+    if (!targetType || !targetId || !reporterId) {
+      return res.status(400).json({ success: false, error: "targetType, targetId and reporterId are required." });
+    }
+    if (!allowed.includes(targetType)) {
+      return res.status(400).json({ success: false, error: "Invalid targetType." });
+    }
+
+    const db = await loadDB();
+    if (!Array.isArray(db.reports)) db.reports = [];
+
+    // one open report per user per target
+    const existing = db.reports.find(r =>
+      r.targetType === targetType && r.targetId === targetId &&
+      r.reporterId === reporterId && (r.status || "open") === "open"
+    );
+    if (existing) {
+      return res.json({ success: true, message: "You already reported this.", report: existing });
+    }
+
+    const report = {
+      id: createId("RPT"),
+      targetType,
+      targetId,
+      reporterId,
+      reason: String(reason || "No reason given").trim().slice(0, 500),
+      status: "open",
+      createdAt: new Date().toISOString(),
+      resolvedAt: null,
+      resolvedBy: null,
+      notes: null
+    };
+    db.reports.unshift(report);
+
+    // also attach to opportunity.reports for backward compatibility
+    if (targetType === "opportunity") {
+      const opp = (db.opportunities || []).find(o => o.id === targetId);
+      if (opp) {
+        opp.reports = opp.reports || [];
+        if (!opp.reports.some(r => r.userId === reporterId)) {
+          opp.reports.push({ userId: reporterId, reason: report.reason, createdAt: report.createdAt });
+        }
+      }
+    }
+
+    await saveDB(db);
+    res.status(201).json({ success: true, report });
+  } catch (err) {
+    console.error("Report error:", err);
+    res.status(500).json({ success: false, error: "Could not submit report." });
+  }
+});
+
+app.get("/api/reports", async (req, res) => {
+  try {
+    const db = await loadDB();
+    const status = req.query.status || "open";
+    let list = Array.isArray(db.reports) ? db.reports.slice() : [];
+    if (status !== "all") list = list.filter(r => (r.status || "open") === status);
+    list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({ success: true, reports: list, total: list.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not load reports." });
+  }
+});
+
+app.post("/api/reports/:reportId/resolve", async (req, res) => {
+  try {
+    const { resolverId, notes, action } = req.body; // action: dismiss | remove_content
+    const db = await loadDB();
+    if (!Array.isArray(db.reports)) db.reports = [];
+    const report = db.reports.find(r => r.id === req.params.reportId);
+    if (!report) return res.status(404).json({ success: false, error: "Report not found." });
+
+    // simple admin check: user must have isAdmin true
+    const resolver = (db.users || []).find(u => u.userId === resolverId);
+    if (!resolver || !resolver.isAdmin) {
+      return res.status(403).json({ success: false, error: "Admin access required." });
+    }
+
+    report.status = "resolved";
+    report.resolvedAt = new Date().toISOString();
+    report.resolvedBy = resolverId;
+    report.notes = (notes || action || "resolved").slice(0, 500);
+
+    if (action === "remove_content") {
+      const map = {
+        opportunity: "opportunities", idea: "ideas", problem: "problems",
+        project: "projects", post: "posts", team: "teams"
+      };
+      const coll = map[report.targetType];
+      if (coll && Array.isArray(db[coll])) {
+        db[coll] = db[coll].filter(item => item.id !== report.targetId);
+      }
+    }
+
+    await saveDB(db);
+    res.json({ success: true, report });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Could not resolve report." });
+  }
+});
+
+
+
+// Ensure Founder & CEO admin exists (for moderation)
+// Passwords are never hardcoded here — they come from environment variables,
+// or a random one-time password is generated and printed to the server log
+// once, so nobody can just read a password out of the source code.
+function resolveAdminPassword(envVar, label) {
+  if (process.env[envVar]) return process.env[envVar];
+  const generated = crypto.randomBytes(9).toString("base64").replace(/[^a-zA-Z0-9]/g, "").slice(0, 12);
+  console.log(`No ${envVar} set — generated a one-time ${label} password: ${generated}`);
+  console.log(`Log in once with it, then set ${envVar} on your host so it doesn't regenerate on the next restart.`);
+  return generated;
+}
+
+(async function ensureFounder() {
+  try {
+    const db = await loadDB();
+    if (!Array.isArray(db.users)) db.users = [];
+    if (!Array.isArray(db.reports)) db.reports = [];
+    let changed = false;
+    if (!db.users.some(u => u.username === "founder")) {
+      db.users.unshift({
+        userId: "GLOBAL-founder-001",
+        fullName: "Maridiyat Salaudeen",
+        username: "founder",
+        email: "founder@global.org",
+        phone: "+234 905 510 1337",
+        passwordHash: hashPassword(resolveAdminPassword("FOUNDER_PASSWORD", "Founder")),
+        createdAt: new Date().toISOString(),
+        lastLogin: null,
+        bio: "Founder of GLOBAL Organisation.",
+        location: "Lagos, Nigeria",
+        website: "",
+        avatar: null,
+        isAdmin: true,
+        role: "Founder"
+      });
+      changed = true;
+      console.log("Seeded Founder account (username: founder)");
+    }
+    if (!db.users.some(u => u.username === "ceo")) {
+      db.users.unshift({
+        userId: "GLOBAL-ceo-001",
+        fullName: "Sultanic the iconic",
+        username: "ceo",
+        email: "hassansultoon826@gmail.com",
+        passwordHash: hashPassword(resolveAdminPassword("CEO_PASSWORD", "CEO")),
+        createdAt: new Date().toISOString(),
+        lastLogin: null,
+        bio: "CEO of GLOBAL Organisation — Sultanic the iconic.",
+        location: "Lagos, Nigeria",
+        website: "",
+        avatar: null,
+        isAdmin: true,
+        role: "CEO"
+      });
+      changed = true;
+      console.log("Seeded CEO account (username: ceo)");
+    }
+    if (changed) await saveDB(db);
+  } catch (e) {
+    console.error("Founder seed error:", e.message);
+  }
+})();
+
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`GLOBAL Organisation API running on http://0.0.0.0:${PORT}`);
+  console.log(`Database mode: ${getMode()} · data dir: ${DATA_DIR}`);
+  console.log(`Online services:`);
+  console.log(`  GLOBAL AI (Anthropic): ${ANTHROPIC_API_KEY ? "connected" : "not set (local fallback active)"}`);
+  console.log(`  News (GNews):          ${GNEWS_API_KEY ? "connected" : "not set (local fallback)"}`);
+  console.log(`  Payments (Paystack):   ${PAYSTACK_SECRET_KEY ? "connected" : "not set"}`);
+  console.log(`  Research (OpenAlex):   always online (free, no key)`);
+});
+
+server.on("error", (err) => {
+  console.error("Server failed to start:", err.message);
+  process.exit(1);
+});
+
+process.on("SIGTERM", () => {
+  server.close(() => process.exit(0));
+});
+
