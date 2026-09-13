@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Mentorship</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+let a = GLOBAL.account();
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">GROWTH</span>
+    <h1>Mentorship</h1>
+    <p class="muted">Find someone to guide you, or become a mentor to someone starting out.</p>
+  </div>
+</div>
+
+${!a ? `
+<div class="card panel" style="margin-top:14px">
+  <p class="muted">Please <a href="login.html">log in</a> or <a href="create-account.html">create an account</a> to request or offer mentorship.</p>
+</div>
+` : `
+<div id="mentorToggleCard" class="card panel" style="margin-top:14px"></div>
+
+<div class="card panel" style="margin-top:14px">
+  <h3 style="margin-top:0">Your requests</h3>
+  <div id="myRequests"><p class="muted" style="padding:8px 0">Loading…</p></div>
+</div>
+
+<div id="incomingCard" class="card panel" style="margin-top:14px;display:none">
+  <h3 style="margin-top:0">Requests for you as a mentor</h3>
+  <div id="incomingRequests"></div>
+</div>
+`}
+
+<div class="card panel" style="margin-top:14px">
+  <h3 style="margin-top:0">Find a mentor</h3>
+  <div id="mentorList"><p class="muted" style="padding:20px;text-align:center">Loading…</p></div>
+</div>
+`;
+GLOBAL.footer();
+
+function mentorCard(u) {
+  const letter = esc(((u.fullName||u.username||'?')[0]||'?').toUpperCase());
+  const photo = u.avatar
+    ? `<img src="${esc(u.avatar)}" alt="" style="width:52px;height:52px;border-radius:50%;object-fit:cover;background:#1b2636" onerror="this.style.display='none'">`
+    : `<div style="width:52px;height:52px;border-radius:50%;background:#1b2636;display:flex;align-items:center;justify-content:center;color:var(--cyan);font-weight:800;font-size:18px">${letter}</div>`;
+  const isSelf = a && a.userId === u.userId;
+  return `
+    <div style="display:flex;gap:14px;align-items:flex-start;padding:14px 0;border-bottom:1px solid #1a2230">
+      ${photo}
+      <div style="flex:1;min-width:0">
+        <strong>${esc(u.fullName || u.username)}</strong>
+        <span class="muted"> @${esc(u.username)}</span>
+        <p class="muted" style="margin:4px 0 0;font-size:13px">${esc(u.mentorHeadline || u.bio || 'GLOBAL mentor')}</p>
+        ${u.mentorTopics ? `<p style="margin:6px 0 0;font-size:12px"><span class="badge">Helps with</span> ${esc(u.mentorTopics)}</p>` : ''}
+      </div>
+      ${isSelf ? '<span class="badge">You</span>' :
+        (a ? `<button class="btn primary" onclick="requestMentor('${u.userId}','${esc(u.fullName || u.username).replace(/'/g,"\\'")}')">Request</button>` : '')}
+    </div>`;
+}
+
+function requestCard(m, viewAsMentor) {
+  const statusColor = m.status === 'accepted' ? '#4ade80' : m.status === 'declined' ? '#ff8490' : '#f5c451';
+  return `
+    <div style="padding:12px 0;border-bottom:1px solid #1a2230">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <strong>${viewAsMentor ? esc(m.menteeName) : esc(m.mentorName)}</strong>
+          <span style="color:${statusColor};font-size:12px;margin-left:8px;text-transform:uppercase;letter-spacing:.04em">${esc(m.status)}</span>
+        </div>
+        <span class="muted" style="font-size:12px">${new Date(m.createdAt).toLocaleDateString()}</span>
+      </div>
+      ${m.message ? `<p class="muted" style="margin:6px 0 0;font-size:13px">${esc(m.message)}</p>` : ''}
+      ${viewAsMentor && m.status === 'pending' ? `
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button class="btn primary" onclick="respond('${m.id}','accepted')">Accept</button>
+          <button class="btn" onclick="respond('${m.id}','declined')">Decline</button>
+        </div>` : ''}
+    </div>`;
+}
+
+async function loadMentors() {
+  const el = document.getElementById('mentorList');
+  try {
+    const r = await fetch('/api/mentors');
+    const d = await r.json();
+    const mentors = d.mentors || [];
+    if (!mentors.length) {
+      el.innerHTML = '<p class="muted" style="padding:20px;text-align:center">No mentors yet — be the first to offer guidance.</p>';
+      return;
+    }
+    el.innerHTML = mentors.map(mentorCard).join('');
+  } catch (e) {
+    el.innerHTML = '<p class="muted" style="padding:20px">Could not load mentors. Is the server running?</p>';
+  }
+}
+
+async function loadMyRequests() {
+  if (!a) return;
+  try {
+    const r = await fetch('/api/mentorships?userId=' + encodeURIComponent(a.userId) + '&role=mentee');
+    const d = await r.json();
+    const items = d.mentorships || [];
+    const el = document.getElementById('myRequests');
+    el.innerHTML = items.length
+      ? items.map(m => requestCard(m, false)).join('')
+      : '<p class="muted" style="padding:8px 0">You haven\\'t requested a mentor yet.</p>';
+  } catch (e) {}
+
+  if (a.isMentor) {
+    try {
+      const r2 = await fetch('/api/mentorships?userId=' + encodeURIComponent(a.userId) + '&role=mentor');
+      const d2 = await r2.json();
+      const items2 = d2.mentorships || [];
+      document.getElementById('incomingCard').style.display = 'block';
+      document.getElementById('incomingRequests').innerHTML = items2.length
+        ? items2.map(m => requestCard(m, true)).join('')
+        : '<p class="muted" style="padding:8px 0">No requests yet.</p>';
+    } catch (e) {}
+  }
+}
+
+function renderToggle() {
+  const el = document.getElementById('mentorToggleCard');
+  if (!el) return;
+  if (a.isMentor) {
+    el.innerHTML = `
+      <h3 style="margin-top:0">You're listed as a mentor</h3>
+      <label class="muted" style="font-size:13px;display:block;margin-top:8px">Headline</label>
+      <input id="mHeadline" placeholder="e.g. Product & fundraising for early-stage startups" value="${esc(a.mentorHeadline||'')}" style="width:100%;margin-top:4px">
+      <label class="muted" style="font-size:13px;display:block;margin-top:10px">Topics you help with</label>
+      <input id="mTopics" placeholder="e.g. Product, Fundraising, Engineering" value="${esc(a.mentorTopics||'')}" style="width:100%;margin-top:4px">
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button class="btn primary" id="saveMentorBtn">Save</button>
+        <button class="btn" id="stopMentorBtn" style="color:#ff8490">Stop mentoring</button>
+      </div>
+      <p id="mentorStatus" class="muted" style="font-size:13px;margin:8px 0 0"></p>
+    `;
+    document.getElementById('saveMentorBtn').onclick = () => saveMentorProfile(true);
+    document.getElementById('stopMentorBtn').onclick = () => saveMentorProfile(false);
+  } else {
+    el.innerHTML = `
+      <h3 style="margin-top:0">Become a mentor</h3>
+      <p class="muted" style="font-size:13px">Share what you're good at and let people starting out find you.</p>
+      <label class="muted" style="font-size:13px;display:block;margin-top:8px">Headline</label>
+      <input id="mHeadline" placeholder="e.g. Product & fundraising for early-stage startups" style="width:100%;margin-top:4px">
+      <label class="muted" style="font-size:13px;display:block;margin-top:10px">Topics you help with</label>
+      <input id="mTopics" placeholder="e.g. Product, Fundraising, Engineering" style="width:100%;margin-top:4px">
+      <button class="btn primary" id="startMentorBtn" style="margin-top:12px">Become a mentor</button>
+      <p id="mentorStatus" class="muted" style="font-size:13px;margin:8px 0 0"></p>
+    `;
+    document.getElementById('startMentorBtn').onclick = () => saveMentorProfile(true);
+  }
+}
+
+async function saveMentorProfile(isMentor) {
+  const headline = document.getElementById('mHeadline').value.trim();
+  const topics = document.getElementById('mTopics').value.trim();
+  const status = document.getElementById('mentorStatus');
+  status.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/user/' + a.userId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isMentor, mentorHeadline: headline, mentorTopics: topics })
+    });
+    const d = await r.json();
+    if (!d.success) { status.textContent = d.error || 'Could not save.'; return; }
+    a = d.user;
+    localStorage.setItem('global_current_account', JSON.stringify(a));
+    renderToggle();
+    loadMentors();
+    loadMyRequests();
+  } catch (e) {
+    status.textContent = 'Network error. Is the server running?';
+  }
+}
+
+window.requestMentor = async function(mentorId, mentorName) {
+  if (!a) { location.href = 'login.html'; return; }
+  const message = prompt('Say a little about what you\\'d like help with (optional):') || '';
+  try {
+    const r = await fetch('/api/mentorships', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mentorId, mentorName,
+        menteeId: a.userId, menteeName: a.fullName || a.username,
+        message
+      })
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.error || 'Could not send request.'); return; }
+    alert('Mentorship request sent!');
+    loadMyRequests();
+  } catch (e) {
+    alert('Network error. Is the server running?');
+  }
+};
+
+window.respond = async function(id, status) {
+  try {
+    const r = await fetch('/api/mentorships/' + id + '/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.error || 'Could not update request.'); return; }
+    loadMyRequests();
+  } catch (e) {
+    alert('Network error. Is the server running?');
+  }
+};
+
+loadMentors();
+if (a) { renderToggle(); loadMyRequests(); }
+</script>
+</body>
+</html>

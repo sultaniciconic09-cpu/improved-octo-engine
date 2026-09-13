@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — People</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">NETWORK</span>
+    <h1>People</h1>
+    <p class="muted">Founders, builders and collaborators on GLOBAL.</p>
+  </div>
+</div>
+<div id="leadership" class="card panel" style="margin-top:14px;display:none"></div>
+<div id="peopleList" class="card panel" style="margin-top:14px"><p class="muted" style="padding:20px;text-align:center">Loading…</p></div>
+`;
+GLOBAL.footer();
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function personCard(u, highlight) {
+  const isSelf = a && a.userId === u.userId;
+  const role = u.role ? `<span class="badge">${esc(u.role)}</span> ` : '';
+  const letter = esc(((u.fullName||u.username||'?')[0]||'?').toUpperCase());
+  const photo = u.avatar
+    ? `<img src="${esc(u.avatar)}" alt="" style="width:56px;height:56px;border-radius:50%;object-fit:cover;background:#1b2636" onerror="this.style.display='none'">`
+    : `<div style="width:56px;height:56px;border-radius:50%;background:#1b2636;display:flex;align-items:center;justify-content:center;color:var(--cyan);font-weight:800;font-size:20px">${letter}</div>`;
+  return `
+    <div style="display:flex;gap:14px;align-items:center;padding:14px 0;border-bottom:1px solid #1a2230;${highlight?'background:rgba(108,99,255,0.06);margin:0 -16px;padding:14px 16px;border-radius:12px;border:1px solid rgba(108,99,255,0.25);margin-bottom:8px':''}">
+      ${photo}
+      <div style="flex:1;min-width:0">
+        ${role}<strong>${esc(u.fullName || u.username)}</strong>
+        <span class="muted"> @${esc(u.username)}</span>
+        <p class="muted" style="margin:4px 0 0;font-size:13px">${esc(u.bio || u.location || 'GLOBAL Builder')}</p>
+        ${u.phone ? `<p class="muted" style="margin:2px 0 0;font-size:12px">${esc(u.phone)}</p>` : ''}
+      </div>
+      ${isSelf ? '<span class="badge">You</span>' : ''}
+    </div>`;
+}
+
+(async () => {
+  try {
+    const r = await fetch('/api/users');
+    const data = await r.json();
+    const users = data.users || [];
+    const leaders = users.filter(u => u.role === 'CEO' || u.role === 'Founder' || u.username === 'ceo' || u.username === 'founder');
+    const others = users.filter(u => !leaders.includes(u));
+
+    const leadEl = document.getElementById('leadership');
+    if (leaders.length) {
+      leadEl.style.display = 'block';
+      leadEl.innerHTML = `<h3 style="margin:0 0 12px">Leadership</h3>` +
+        leaders.map(u => personCard(u, true)).join('');
+    }
+
+    const el = document.getElementById('peopleList');
+    if (!users.length) {
+      el.innerHTML = '<p class="muted" style="padding:20px;text-align:center">No people yet. <a href="create-account.html">Create an account</a>.</p>';
+      return;
+    }
+    el.innerHTML = (others.length ? `<h3 style="margin:0 0 12px">Community</h3>` : '') +
+      (others.length ? others.map(u => personCard(u, false)).join('') :
+        (leaders.length ? '<p class="muted" style="padding:8px 0">Only leadership accounts so far — invite builders!</p>' : ''));
+  } catch (e) {
+    document.getElementById('peopleList').innerHTML = '<p class="muted" style="padding:20px">Could not load people. Is the server running?</p>';
+  }
+})();
+</script>
+</body>
+</html>

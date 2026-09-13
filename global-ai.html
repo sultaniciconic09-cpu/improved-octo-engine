@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — GLOBAL AI</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">INTELLIGENCE</span>
+    <h1>GLOBAL AI</h1>
+    <p class="muted">Ask about a problem, sharpen an idea, or find your way around GLOBAL.</p>
+  </div>
+</div>
+
+<div id="chatWindow" class="card panel" style="margin-top:14px;min-height:320px;max-height:55vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding:18px;">
+  <p class="muted" style="text-align:center">Loading conversation&hellip;</p>
+</div>
+
+<div class="composer panel" style="margin-top:14px">
+  <textarea id="chatInput" placeholder="Ask GLOBAL AI about a problem, project, research or idea&hellip;" rows="2"></textarea>
+  <div class="composer-row">
+    <span id="chatStatus" class="muted"></span>
+    <button class="btn primary" id="chatSend">Ask GLOBAL AI</button>
+  </div>
+</div>
+`;
+
+GLOBAL.footer();
+
+const $ = id => document.getElementById(id);
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderMessage(role, text) {
+  const isUser = role === 'user';
+  return `<div style="align-self:${isUser ? 'flex-end' : 'flex-start'};max-width:80%;background:${isUser ? 'rgba(108,99,255,0.18)' : 'rgba(255,255,255,0.06)'};padding:10px 14px;border-radius:14px;white-space:pre-wrap;">${escapeHtml(text)}</div>`;
+}
+
+function scrollToBottom() {
+  const win = $('chatWindow');
+  win.scrollTop = win.scrollHeight;
+}
+
+async function loadHistory() {
+  const win = $('chatWindow');
+
+  if (!a) {
+    win.innerHTML = `<div style="text-align:center;padding:20px"><p class="muted">Login to chat with GLOBAL AI and keep your conversation saved.</p><a class="btn primary" href="login.html" style="margin-top:10px;display:inline-block">Login</a></div>`;
+    return;
+  }
+
+  try {
+    const r = await fetch('/api/ai/history/' + (a.userId || a.id));
+    const d = await r.json();
+    const history = d.history || [];
+
+    if (!history.length) {
+      win.innerHTML = `<p class="muted" style="text-align:center">Ask GLOBAL AI anything to get started.</p>`;
+      return;
+    }
+
+    win.innerHTML = history.map(m => renderMessage(m.role, m.content)).join('');
+    scrollToBottom();
+  } catch (e) {
+    win.innerHTML = `<p class="muted" style="text-align:center">Ask GLOBAL AI anything to get started.</p>`;
+  }
+}
+
+async function sendMessage() {
+  if (!a) { window.location.href = 'login.html'; return; }
+
+  const input = $('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const win = $('chatWindow');
+  if (win.querySelector('p.muted')) win.innerHTML = '';
+  win.insertAdjacentHTML('beforeend', renderMessage('user', text));
+  scrollToBottom();
+
+  input.value = '';
+  $('chatSend').disabled = true;
+  $('chatStatus').textContent = 'GLOBAL AI is thinking...';
+
+  try {
+    const r = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: a.userId || a.id, message: text })
+    });
+    const d = await r.json();
+
+    if (!r.ok || !d.success) {
+      $('chatStatus').textContent = d.error || 'GLOBAL AI could not respond.';
+      return;
+    }
+
+    win.insertAdjacentHTML('beforeend', renderMessage('assistant', d.reply));
+    scrollToBottom();
+    $('chatStatus').textContent = '';
+  } catch (e) {
+    $('chatStatus').textContent = 'Could not reach GLOBAL AI right now.';
+  } finally {
+    $('chatSend').disabled = false;
+  }
+}
+
+$('chatSend').onclick = sendMessage;
+$('chatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+loadHistory();
+</script>
+</body>
+</html>

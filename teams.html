@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Teams</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">TEAMS</span>
+    <h1>Teams</h1>
+    <p class="muted">Form teams around ideas, problems and projects.</p>
+  </div>
+  <button class="btn primary" id="openCreate">Create team</button>
+</div>
+
+<div id="createPanel" class="card panel" style="margin-top:14px;display:none">
+  <h3 style="margin:0 0 12px">Create a team</h3>
+  <input id="teamName" placeholder="Team name" style="width:100%;margin-bottom:10px">
+  <textarea id="teamDesc" placeholder="What is this team building or solving?" rows="3" style="width:100%;margin-bottom:10px"></textarea>
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="btn primary" id="submitTeam">Create</button>
+    <button class="btn" id="cancelCreate">Cancel</button>
+    <span id="teamStatus" class="muted"></span>
+  </div>
+</div>
+
+<div id="teamList" class="card panel" style="margin-top:14px">
+  <p class="muted" style="padding:20px;text-align:center">Loading teams…</p>
+</div>
+`;
+
+GLOBAL.footer();
+
+const $ = id => document.getElementById(id);
+
+function formatDate(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString();
+  } catch { return ''; }
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadTeams() {
+  const list = $('teamList');
+  list.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Loading…</p>';
+  try {
+    const r = await fetch('/api/teams');
+    const d = await r.json();
+    const items = d.teams || [];
+    if (!items.length) {
+      list.innerHTML = `<div style="padding:32px;text-align:center">
+        <p class="muted">No teams yet.</p>
+        <button class="btn primary" style="margin-top:12px" onclick="document.getElementById('openCreate').click()">Create the first team</button>
+      </div>`;
+      return;
+    }
+    list.innerHTML = '<div class="list">' + items.map(t => `
+      <div class="list-item">
+        <h3 style="margin:0 0 4px">${escapeHtml(t.name)}</h3>
+        <p class="muted" style="margin:0 0 8px">${escapeHtml(t.description || 'No description')}</p>
+        <div class="muted" style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <span>${escapeHtml(t.creatorName || 'Unknown')} · ${formatDate(t.createdAt)} · ${(t.members || []).length} member(s)</span>
+          ${a ? `<button class="btn" style="padding:4px 12px;font-size:13px" data-join="${t.id}">Join</button>` : ''}
+        </div>
+      </div>
+    `).join('') + '</div>';
+
+    list.querySelectorAll('[data-join]').forEach(btn => {
+      btn.onclick = async () => {
+        if (!a) return location.href = 'login.html';
+        btn.disabled = true;
+        btn.textContent = 'Joining…';
+        try {
+          const r = await fetch('/api/teams/' + btn.dataset.join + '/join', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ userId: a.userId || a.id })
+          });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'Failed');
+          loadTeams();
+        } catch (e) {
+          btn.textContent = 'Error';
+          setTimeout(() => { btn.disabled = false; btn.textContent = 'Join'; }, 1500);
+        }
+      };
+    });
+  } catch (e) {
+    list.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Could not load teams.</p>';
+  }
+}
+
+$('openCreate').onclick = () => {
+  if (!a) return location.href = 'login.html';
+  $('createPanel').style.display = 'block';
+  $('teamName').focus();
+};
+$('cancelCreate').onclick = () => { $('createPanel').style.display = 'none'; $('teamStatus').textContent = ''; };
+$('submitTeam').onclick = async () => {
+  const name = $('teamName').value.trim();
+  if (!name) { $('teamStatus').textContent = 'Team name required.'; return; }
+  $('submitTeam').disabled = true;
+  $('teamStatus').textContent = 'Creating…';
+  try {
+    const r = await fetch('/api/teams', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name,
+        description: $('teamDesc').value.trim(),
+        creatorId: a.userId || a.id,
+        creatorName: a.fullName || a.username || 'Builder'
+      })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed');
+    $('teamName').value = ''; $('teamDesc').value = '';
+    $('createPanel').style.display = 'none';
+    loadTeams();
+  } catch (e) {
+    $('teamStatus').textContent = 'Could not create.';
+  } finally {
+    $('submitTeam').disabled = false;
+  }
+};
+
+loadTeams();
+</script>
+</body>
+</html>

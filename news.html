@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — News</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">GLOBAL INFORMATION</span>
+    <h1>News</h1>
+    <p class="muted">Nigeria &middot; Africa &middot; World &middot; Technology &middot; Science &middot; Business</p>
+  </div>
+</div>
+
+<div class="tabs panel" id="newsTabs">
+  <button class="tab active" data-cat="general">Top</button>
+  <button class="tab" data-cat="technology">Technology</button>
+  <button class="tab" data-cat="business">Business</button>
+  <button class="tab" data-cat="science">Science</button>
+  <button class="tab" data-cat="health">Health</button>
+  <button class="tab" data-cat="world">World</button>
+</div>
+
+<div id="newsList" class="news-grid" style="margin-top:14px">
+  <p class="muted" style="padding:20px;text-align:center">Loading news&hellip;</p>
+</div>
+`;
+
+GLOBAL.footer();
+
+const $ = id => document.getElementById(id);
+let currentCategory = 'general';
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function formatDate(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString() + ' &middot; ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  } catch { return ''; }
+}
+
+async function loadNews() {
+  const list = $('newsList');
+  list.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Loading news&hellip;</p>';
+
+  try {
+    const r = await fetch('/api/news?mode=headlines&category=' + encodeURIComponent(currentCategory) + '&country=ng&max=12');
+    const d = await r.json();
+
+    if (!r.ok || !d.success) {
+      list.innerHTML = `<div style="padding:32px;text-align:center">
+        <p class="muted">${escapeHtml(d.error || 'News is not available right now.')}</p>
+      </div>`;
+      return;
+    }
+
+    const articles = d.articles || [];
+
+    if (!articles.length) {
+      list.innerHTML = '<div style="padding:32px;text-align:center"><p class="muted">No news found for this category right now.</p></div>';
+      return;
+    }
+
+    const [featured, ...rest] = articles;
+
+    list.innerHTML = `
+      <a class="panel news-hero" href="${escapeHtml(featured.url)}" target="_blank" rel="noopener" style="display:block;text-decoration:none;color:inherit;${featured.image ? `background-image:url('${escapeHtml(featured.image)}');background-size:cover;background-position:center;` : ''}">
+        <div>
+          <span class="badge">FEATURED</span>
+          <h2>${escapeHtml(featured.title)}</h2>
+          <p class="muted">${escapeHtml(featured.description || '')}</p>
+          <div class="muted" style="font-size:12px">${escapeHtml(featured.source && featured.source.name)} &middot; ${formatDate(featured.publishedAt)}</div>
+        </div>
+      </a>
+      <div class="list" style="margin-top:14px">
+        ${rest.map(a => `
+          <a class="list-item" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" style="display:block;text-decoration:none;color:inherit;">
+            <h3 style="margin:0 0 4px">${escapeHtml(a.title)}</h3>
+            <p class="muted" style="margin:0 0 6px">${escapeHtml(a.description || '')}</p>
+            <div class="muted" style="font-size:12px">${escapeHtml(a.source && a.source.name)} &middot; ${formatDate(a.publishedAt)}</div>
+          </a>
+        `).join('')}
+      </div>
+    `;
+  } catch (e) {
+    list.innerHTML = '<div style="padding:32px;text-align:center"><p class="muted">Could not load news right now.</p></div>';
+  }
+}
+
+$('newsTabs').onclick = e => {
+  const btn = e.target.closest('[data-cat]');
+  if (!btn) return;
+  document.querySelectorAll('#newsTabs .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  currentCategory = btn.dataset.cat;
+  loadNews();
+};
+
+loadNews();
+</script>
+</body>
+</html>

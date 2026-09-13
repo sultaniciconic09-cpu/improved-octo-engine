@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Innovation Hub</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">BUILD</span>
+    <h1>Innovation Hub</h1>
+    <p class="muted">Share what you are inventing — AI, hardware, energy, agriculture and more.</p>
+  </div>
+  ${a ? '<button class="btn primary" id="openCreate">Add innovation</button>' : '<a class="btn primary" href="login.html">Log in to contribute</a>'}
+</div>
+<div id="createPanel" class="card panel" style="margin-top:14px;display:none">
+  <h3 style="margin:0 0 12px">Share an innovation</h3>
+  <input id="inTitle" placeholder="Title" style="width:100%;margin-bottom:10px">
+  <textarea id="inDesc" placeholder="What are you building?" rows="3" style="width:100%;margin-bottom:10px"></textarea>
+  <select id="inCat" style="margin-bottom:10px">
+    <option>AI</option><option>Energy</option><option>Agriculture</option><option>Hardware</option><option>Software</option><option>Other</option>
+  </select>
+  <div>
+    <button class="btn primary" id="saveIn">Publish</button>
+    <button class="btn" id="cancelIn">Cancel</button>
+    <span id="inStatus" class="muted"></span>
+  </div>
+</div>
+<div id="inList" class="card panel" style="margin-top:14px"><p class="muted" style="padding:20px;text-align:center">Loading…</p></div>
+`;
+GLOBAL.footer();
+
+const $ = id => document.getElementById(id);
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+async function load() {
+  try {
+    const r = await fetch('/api/innovation-items');
+    const data = await r.json();
+    const items = data.items || data.innovationItems || [];
+    if (!items.length) {
+      $('inList').innerHTML = '<p class="muted" style="padding:20px;text-align:center">No innovations yet. Be the first.</p>';
+      return;
+    }
+    $('inList').innerHTML = items.map(i => `
+      <div style="padding:14px 0;border-bottom:1px solid #1a2230">
+        <span class="badge">${esc(i.category || i.status || 'Innovation')}</span>
+        <h3 style="margin:8px 0 4px">${esc(i.title)}</h3>
+        <p class="muted" style="margin:0;font-size:14px">${esc(i.description || '')}</p>
+        <p class="muted" style="font-size:12px;margin-top:6px">${esc(i.authorName || '')}</p>
+      </div>
+    `).join('');
+  } catch (e) {
+    $('inList').innerHTML = '<p class="muted" style="padding:20px">Could not load. Is the server running?</p>';
+  }
+}
+
+if (a) {
+  $('openCreate').onclick = () => { $('createPanel').style.display = 'block'; };
+  $('cancelIn').onclick = () => { $('createPanel').style.display = 'none'; };
+  $('saveIn').onclick = async () => {
+    const title = $('inTitle').value.trim();
+    if (!title) return;
+    $('saveIn').disabled = true;
+    try {
+      const r = await fetch('/api/innovation-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          description: $('inDesc').value.trim(),
+          category: $('inCat').value,
+          authorId: a.userId,
+          authorName: a.fullName || a.username
+        })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed');
+      $('inTitle').value = '';
+      $('inDesc').value = '';
+      $('createPanel').style.display = 'none';
+      load();
+    } catch (e) {
+      $('inStatus').textContent = e.message || 'Failed';
+    }
+    $('saveIn').disabled = false;
+  };
+}
+load();
+</script>
+</body>
+</html>

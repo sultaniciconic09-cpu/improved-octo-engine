@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Messages</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">CONNECT</span>
+    <h1>Messages</h1>
+    <p class="muted">Send and receive messages with other builders.</p>
+  </div>
+</div>
+${a ? `
+<div class="card panel" style="margin-top:14px">
+  <textarea id="msgText" placeholder="Write a message…" rows="3" style="width:100%;margin-bottom:10px"></textarea>
+  <button class="btn primary" id="sendBtn">Send message</button>
+  <span id="status" class="muted" style="margin-left:10px"></span>
+</div>
+<div id="msgList" class="card panel" style="margin-top:14px"><p class="muted" style="padding:16px;text-align:center">Loading…</p></div>
+` : `<div class="card panel" style="margin-top:14px"><p class="muted">Please <a href="login.html">log in</a> to use messages.</p></div>`}
+`;
+GLOBAL.footer();
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+if (a) {
+  const $ = id => document.getElementById(id);
+  async function load() {
+    try {
+      const r = await fetch('/api/messages?userId=' + encodeURIComponent(a.userId));
+      const data = await r.json();
+      const list = data.messages || [];
+      if (!list.length) {
+        $('msgList').innerHTML = '<p class="muted" style="padding:16px;text-align:center">No messages yet. Send the first one.</p>';
+        return;
+      }
+      $('msgList').innerHTML = list.map(m => `
+        <div style="padding:12px 0;border-bottom:1px solid #1a2230">
+          <strong>${esc(m.fromName || 'Builder')}</strong>
+          <span class="muted" style="font-size:12px;margin-left:8px">${m.createdAt ? new Date(m.createdAt).toLocaleString() : ''}</span>
+          <p style="margin:6px 0 0">${esc(m.text)}</p>
+        </div>
+      `).join('');
+    } catch (e) {
+      $('msgList').innerHTML = '<p class="muted" style="padding:16px">Could not load messages. Is the server running?</p>';
+    }
+  }
+  $('sendBtn').onclick = async () => {
+    const text = $('msgText').value.trim();
+    if (!text) return;
+    $('sendBtn').disabled = true;
+    $('status').textContent = 'Sending…';
+    try {
+      const r = await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromId: a.userId, fromName: a.fullName || a.username, text })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed');
+      $('msgText').value = '';
+      $('status').textContent = 'Sent';
+      load();
+    } catch (e) {
+      $('status').textContent = e.message || 'Send failed';
+    }
+    $('sendBtn').disabled = false;
+  };
+  load();
+}
+</script>
+</body>
+</html>

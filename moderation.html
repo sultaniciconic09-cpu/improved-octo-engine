@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Moderation</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">SAFETY</span>
+    <h1>Moderation</h1>
+    <p class="muted">Review reports from the community. Admin access required to resolve.</p>
+  </div>
+  <button class="btn" id="refreshBtn">Refresh</button>
+</div>
+<div class="tabs panel" id="tabs">
+  <button class="tab active" data-status="open">Open</button>
+  <button class="tab" data-status="resolved">Resolved</button>
+  <button class="tab" data-status="all">All</button>
+</div>
+<div id="list" class="card panel" style="margin-top:14px"><p class="muted" style="padding:20px;text-align:center">Loading…</p></div>
+`;
+GLOBAL.footer();
+
+let currentStatus = 'open';
+const $ = id => document.getElementById(id);
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+async function load() {
+  try {
+    const r = await fetch('/api/reports?status=' + encodeURIComponent(currentStatus));
+    const data = await r.json();
+    const reports = data.reports || [];
+    if (!reports.length) {
+      $('list').innerHTML = '<p class="muted" style="padding:20px;text-align:center">No reports in this view.</p>';
+      return;
+    }
+    $('list').innerHTML = reports.map(r => `
+      <div style="padding:14px 0;border-bottom:1px solid #1a2230">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <div>
+            <span class="badge">${esc(r.targetType)}</span>
+            <span class="badge" style="margin-left:6px">${esc(r.status || 'open')}</span>
+            <p style="margin:8px 0 4px"><strong>Target:</strong> ${esc(r.targetId)}</p>
+            <p class="muted" style="margin:0;font-size:14px">${esc(r.reason)}</p>
+            <p class="muted" style="font-size:12px;margin-top:6px">Reporter: ${esc(r.reporterId)} · ${r.createdAt ? new Date(r.createdAt).toLocaleString() : ''}</p>
+          </div>
+          ${(r.status || 'open') === 'open' && a ? `
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn" data-action="dismiss" data-id="${esc(r.id)}">Dismiss</button>
+            <button class="btn" style="color:#ff8490" data-action="remove" data-id="${esc(r.id)}">Remove content</button>
+          </div>` : ''}
+        </div>
+      </div>
+    `).join('');
+
+    $('list').querySelectorAll('[data-action]').forEach(btn => {
+      btn.onclick = async () => {
+        if (!a) return location.href = 'login.html';
+        const action = btn.dataset.action === 'remove' ? 'remove_content' : 'dismiss';
+        if (action === 'remove_content' && !confirm('Remove this content permanently?')) return;
+        btn.disabled = true;
+        try {
+          const res = await fetch('/api/reports/' + btn.dataset.id + '/resolve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resolverId: a.userId, action, notes: action })
+          });
+          const d = await res.json();
+          if (!res.ok) throw new Error(d.error || 'Failed');
+          load();
+        } catch (e) {
+          alert(e.message || 'Could not resolve. You may need admin access (isAdmin on your account).');
+          btn.disabled = false;
+        }
+      };
+    });
+  } catch (e) {
+    $('list').innerHTML = '<p class="muted" style="padding:20px">Could not load reports.</p>';
+  }
+}
+
+$('tabs').onclick = e => {
+  const btn = e.target.closest('[data-status]');
+  if (!btn) return;
+  document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  currentStatus = btn.dataset.status;
+  load();
+};
+$('refreshBtn').onclick = load;
+load();
+</script>
+</body>
+</html>

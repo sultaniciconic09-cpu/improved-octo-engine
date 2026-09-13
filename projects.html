@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Projects</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">PROJECTS</span>
+    <h1>Projects</h1>
+    <p class="muted">Turn ideas into real work. Find teams, track progress, ship impact.</p>
+  </div>
+  <button class="btn primary" id="openCreate">Start a project</button>
+</div>
+
+<div class="tabs panel" id="projTabs">
+  <button class="tab active" data-filter="all">All</button>
+  <button class="tab" data-filter="Ideation">Ideation</button>
+  <button class="tab" data-filter="Building">Building</button>
+  <button class="tab" data-filter="Live">Live</button>
+  <button class="tab" data-filter="Technology">Technology</button>
+  <button class="tab" data-filter="Education">Education</button>
+</div>
+
+<div id="createPanel" class="card panel" style="margin-top:14px;display:none">
+  <h3 style="margin:0 0 12px">Start a project</h3>
+  <input id="projTitle" placeholder="Project name" style="width:100%;margin-bottom:10px">
+  <textarea id="projContent" placeholder="What are you building? Goals, current stage, and who you need..." rows="4" style="width:100%;margin-bottom:10px"></textarea>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+    <select id="projCategory">
+      <option value="General">General</option>
+      <option value="Technology">Technology</option>
+      <option value="Education">Education</option>
+      <option value="Energy">Energy</option>
+      <option value="Health">Health</option>
+      <option value="Agriculture">Agriculture</option>
+    </select>
+    <select id="projStatus">
+      <option value="Ideation">Ideation</option>
+      <option value="Building">Building</option>
+      <option value="Live">Live</option>
+    </select>
+    <input id="projLooking" placeholder="Looking for (e.g. Frontend, Designer, Funding)" style="flex:1;min-width:180px">
+  </div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="btn primary" id="submitProj">Create project</button>
+    <button class="btn" id="cancelCreate">Cancel</button>
+    <span id="projStatusMsg" class="muted"></span>
+  </div>
+</div>
+
+<div id="projList" class="card panel" style="margin-top:14px">
+  <p class="muted" style="padding:20px;text-align:center">Loading projects…</p>
+</div>
+`;
+
+GLOBAL.footer();
+
+const $ = id => document.getElementById(id);
+let currentFilter = 'all';
+
+function formatDate(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString() + ' · ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  } catch { return ''; }
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadProjects() {
+  const list = $('projList');
+  list.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Loading projects…</p>';
+  try {
+    const r = await fetch('/api/projects');
+    const d = await r.json();
+    let items = d.projects || [];
+    if (currentFilter !== 'all') {
+      items = items.filter(p => 
+        (p.status || '') === currentFilter || 
+        (p.category || '') === currentFilter
+      );
+    }
+    if (!items.length) {
+      list.innerHTML = `<div style="padding:32px;text-align:center">
+        <p class="muted">No projects yet.</p>
+        <button class="btn primary" style="margin-top:12px" onclick="document.getElementById('openCreate').click()">Start the first one</button>
+      </div>`;
+      return;
+    }
+    list.innerHTML = '<div class="list">' + items.map(p => `
+      <div class="list-item">
+        <span class="badge">${escapeHtml(p.status || 'Ideation')}</span>
+        <span class="badge" style="margin-left:6px">${escapeHtml(p.category || 'General')}</span>
+        <h3 style="margin:8px 0 4px">${escapeHtml(p.title)}</h3>
+        <p class="muted" style="margin:0 0 8px">${escapeHtml(p.content)}</p>
+        <div class="muted" style="font-size:12px">
+          ${escapeHtml(p.authorName || 'Anonymous')} · ${formatDate(p.createdAt)}
+          ${p.lookingFor && p.lookingFor.length ? ' · Looking for: ' + p.lookingFor.map(h => '<span class="tag">'+escapeHtml(h)+'</span>').join(' ') : ''}
+        </div>
+      </div>
+    `).join('') + '</div>';
+  } catch (e) {
+    list.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Could not load projects.</p>';
+  }
+}
+
+$('openCreate').onclick = () => {
+  if (!a) return location.href = 'login.html';
+  $('createPanel').style.display = 'block';
+  $('projTitle').focus();
+};
+$('cancelCreate').onclick = () => { $('createPanel').style.display = 'none'; $('projStatusMsg').textContent = ''; };
+$('submitProj').onclick = async () => {
+  const title = $('projTitle').value.trim();
+  const content = $('projContent').value.trim();
+  if (!title || !content) { $('projStatusMsg').textContent = 'Title and description required.'; return; }
+  $('submitProj').disabled = true;
+  $('projStatusMsg').textContent = 'Creating…';
+  try {
+    const looking = $('projLooking').value.split(',').map(s => s.trim()).filter(Boolean);
+    const r = await fetch('/api/projects', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        title, content,
+        category: $('projCategory').value,
+        status: $('projStatus').value,
+        lookingFor: looking,
+        authorId: a.userId || a.id,
+        authorName: a.fullName || a.username || 'Builder'
+      })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed');
+    $('projTitle').value = ''; $('projContent').value = ''; $('projLooking').value = '';
+    $('createPanel').style.display = 'none';
+    loadProjects();
+  } catch (e) {
+    $('projStatusMsg').textContent = 'Could not create.';
+  } finally {
+    $('submitProj').disabled = false;
+  }
+};
+
+$('projTabs').onclick = e => {
+  const btn = e.target.closest('[data-filter]');
+  if (!btn) return;
+  document.querySelectorAll('#projTabs .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = btn.dataset.filter;
+  loadProjects();
+};
+
+loadProjects();
+</script>
+</body>
+</html>

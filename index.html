@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Home</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script src="assets/feed.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+const name = (a && (a.fullName || a.username)) || 'Builder';
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+app.innerHTML = `
+<section class="home-hero">
+  <div class="home-hero-copy">
+    <span class="eyebrow">GLOBAL ORGANISATION</span>
+    <h1>Build what the world needs.</h1>
+    <p>One place to discover problems, develop ideas, build projects, find people and turn knowledge into impact.</p>
+    <div class="home-actions">
+      <a class="btn primary" href="dashboard.html">Open Feed</a>
+      <a class="btn" href="innovation.html">Innovation Hub</a>
+    </div>
+  </div>
+  <div class="hero-orbit"><div class="orbit-ring"></div><div class="orbit-core">G</div><span class="orbit-dot d1"></span><span class="orbit-dot d2"></span><span class="orbit-dot d3"></span></div>
+</section>
+
+<section class="welcome-row">
+  <div>
+    <span class="eyebrow">YOUR GLOBAL WORKSPACE</span>
+    <h2>Welcome, ${esc(name)}</h2>
+    <p class="muted">What do you want to move forward today?</p>
+  </div>
+  <a class="btn primary" href="profile.html">View profile</a>
+</section>
+
+<section class="home-command">
+  <a class="command-card" href="ideas.html"><span class="command-icon">💡</span><b>Share an idea</b><small>Put a new solution into the network.</small></a>
+  <a class="command-card" href="problems.html"><span class="command-icon">⚠</span><b>Post a problem</b><small>Find people who can help solve it.</small></a>
+  <a class="command-card" href="projects.html"><span class="command-icon">🚀</span><b>Build a project</b><small>Turn an idea into something real.</small></a>
+  <a class="command-card" href="opportunities.html"><span class="command-icon">✦</span><b>Find opportunities</b><small>Discover jobs, funding and support.</small></a>
+</section>
+
+<div class="home-columns">
+  <main>
+    <div class="home-section-head">
+      <div><span class="eyebrow">DISCOVER</span><h2>What's happening on GLOBAL</h2></div>
+      <a href="dashboard.html">View full feed →</a>
+    </div>
+    <div class="tabs panel home-tabs" id="homeFeedTabs">
+      <button type="button" class="tab active" data-cat="all">For You</button>
+      <button type="button" class="tab" data-cat="ideas">Ideas</button>
+      <button type="button" class="tab" data-cat="problems">Problems</button>
+      <button type="button" class="tab" data-cat="projects">Projects</button>
+      <button type="button" class="tab" data-cat="opportunities">Opportunities</button>
+      <button type="button" class="tab" data-cat="ai">AI</button>
+    </div>
+    <div id="homeFeed" class="home-feed"></div>
+  </main>
+  <aside>
+    <div class="home-section-head"><div><span class="eyebrow">FOCUS AREAS</span><h2>Build around a real need</h2></div></div>
+    <div class="focus-list">
+      <a href="problems.html"><b>Nigeria's Problems</b><span>See problems that need builders.</span></a>
+      <a href="ideas.html"><b>New Ideas</b><span>Explore ideas from the community.</span></a>
+      <a href="projects.html"><b>Projects</b><span>Follow things people are building.</span></a>
+      <a href="dashboard.html"><b>Photos &amp; video</b><span>Post media on the full Feed.</span></a>
+    </div>
+    <div class="impact-card panel">
+      <span class="eyebrow">GLOBAL MISSION</span>
+      <h3>Problem → Idea → Team → Project → Impact</h3>
+      <p class="muted">The platform is designed around progress, not just attention.</p>
+      <a class="btn primary" href="innovation.html">Explore Innovation Hub</a>
+    </div>
+  </aside>
+</div>
+`;
+
+GLOBAL.footer();
+
+// Tag filters on home feed
+document.getElementById('homeFeedTabs').onclick = function (e) {
+  const btn = e.target.closest('[data-cat]');
+  if (!btn) return;
+  document.querySelectorAll('#homeFeedTabs .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  loadFeed('homeFeed', btn.dataset.cat);
+};
+
+loadFeed('homeFeed', 'all');
+</script>
+</body>
+</html>

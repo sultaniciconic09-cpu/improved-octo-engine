@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Notifications</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">UPDATES</span>
+    <h1>Notifications</h1>
+    <p class="muted">Activity related to your work on GLOBAL.</p>
+  </div>
+  ${a ? '<button class="btn" id="markRead">Mark all read</button>' : ''}
+</div>
+<div id="list" class="card panel" style="margin-top:14px">
+  <p class="muted" style="padding:16px;text-align:center">${a ? 'Loading…' : 'Please <a href="login.html">log in</a> to see notifications.'}</p>
+</div>
+`;
+GLOBAL.footer();
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+if (a) {
+  async function load() {
+    try {
+      const r = await fetch('/api/notifications?userId=' + encodeURIComponent(a.userId));
+      const data = await r.json();
+      const items = data.notifications || [];
+      const el = document.getElementById('list');
+      if (!items.length) {
+        el.innerHTML = '<p class="muted" style="padding:16px;text-align:center">No notifications yet.</p>';
+        return;
+      }
+      el.innerHTML = items.map(n => `
+        <div style="padding:12px 0;border-bottom:1px solid #1a2230;opacity:${n.read ? 0.55 : 1}">
+          <p style="margin:0">${esc(n.text)}</p>
+          <span class="muted" style="font-size:12px">${n.createdAt ? new Date(n.createdAt).toLocaleString() : ''}</span>
+        </div>
+      `).join('');
+    } catch (e) {
+      document.getElementById('list').innerHTML = '<p class="muted" style="padding:16px">Could not load notifications.</p>';
+    }
+  }
+  document.getElementById('markRead').onclick = async () => {
+    await fetch('/api/notifications/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: a.userId })
+    });
+    load();
+  };
+  load();
+}
+</script>
+</body>
+</html>

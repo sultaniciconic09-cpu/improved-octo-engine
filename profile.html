@@ -1,0 +1,71 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GLOBAL — Profile</title><link rel="stylesheet" href="assets/app.css"></head><body><script src="assets/app.js"></script><script src="assets/feed.js"></script><script>
+GLOBAL.shell();
+const a = GLOBAL.account() || {};
+const app = document.getElementById('app');
+
+app.innerHTML = `<section class="panel"><div class="profile-cover"></div><div class="profile-info"><div class="avatar-upload-wrap" style="position:relative;width:96px;">
+  <img id="profileAvatarImg" class="profile-avatar" src="${a.avatar || ''}" onerror="this.style.background='#1b2636'" alt="">
+  <button type="button" id="avatarEditBtn" style="position:absolute;bottom:0;right:0;width:30px;height:30px;border-radius:50%;border:2px solid #0d1118;background:#6c63ff;color:#fff;font-size:14px;cursor:pointer;">&#9998;</button>
+  <input type="file" id="avatarFileInput" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;">
+</div><h1 style="margin:8px 0 0">${a.name || a.username || 'GLOBAL Member'}</h1><p class="muted">@${a.username || 'member'} &middot; Building ideas into impact.</p><p id="avatarStatus" class="muted" style="font-size:12px;"></p><div class="stat-grid"><div class="stat"><b>0</b><span class="muted">Followers</span></div><div class="stat"><b>0</b><span class="muted">Projects</span></div><div class="stat"><b>0</b><span class="muted">Impact</span></div></div><div class="profile-tabs"><a>Posts</a><a>Projects</a><a>Ideas</a><a>Research</a><a>Skills</a><a>About</a></div></div></section><div style="margin-top:16px" class="section-title"><h2>My Posts</h2></div><div id="feed"></div>`;
+
+loadFeed();
+GLOBAL.footer();
+
+// ---- Profile picture upload ----
+const avatarEditBtn = document.getElementById('avatarEditBtn');
+const avatarFileInput = document.getElementById('avatarFileInput');
+const avatarStatus = document.getElementById('avatarStatus');
+const avatarImg = document.getElementById('profileAvatarImg');
+
+if (avatarEditBtn) {
+  avatarEditBtn.onclick = function () {
+    if (!a.userId) {
+      window.location.href = 'login.html';
+      return;
+    }
+    avatarFileInput.click();
+  };
+}
+
+if (avatarFileInput) {
+  avatarFileInput.onchange = async function () {
+    const file = avatarFileInput.files[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      avatarStatus.textContent = 'That image is too large. Please use one under 5MB.';
+      return;
+    }
+
+    avatarStatus.textContent = 'Uploading...';
+
+    const reader = new FileReader();
+    reader.onload = async function () {
+      try {
+        const res = await fetch('/api/user/' + a.userId + '/avatar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: reader.result })
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          avatarStatus.textContent = data.error || 'Could not upload profile picture.';
+          return;
+        }
+
+        avatarImg.src = data.user.avatar;
+        const stored = JSON.parse(localStorage.getItem('global_current_account') || 'null') || {};
+        stored.avatar = data.user.avatar;
+        localStorage.setItem('global_current_account', JSON.stringify(stored));
+
+        avatarStatus.textContent = 'Profile picture updated.';
+      } catch (err) {
+        avatarStatus.textContent = 'Could not upload right now. Please try again.';
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+}
+</script></body></html>

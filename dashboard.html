@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#070b12"><title>GLOBAL — Feed</title><link rel="stylesheet" href="assets/app.css"></head>
+<body>
+<script src="assets/app.js"></script><script src="assets/feed.js"></script><script>GLOBAL.shell();</script>
+<div id="app"></div>
+<script>
+const app=document.getElementById('app');
+app.innerHTML=`
+<div class="section-title"><div><span class="eyebrow">GLOBAL NETWORK</span><h1>Feed</h1><p class="muted">Ideas, problems, projects and knowledge from people building across the network.</p></div></div>
+<div class="tabs panel feed-tabs" id="feedTabs">
+ <button class="tab active" data-cat="all">For You</button><button class="tab" data-cat="following">Following</button><button class="tab" data-cat="latest">Latest</button><button class="tab" data-cat="ideas">Ideas</button><button class="tab" data-cat="problems">Problems</button><button class="tab" data-cat="projects">Projects</button><button class="tab" data-cat="opportunities">Opportunities</button><button class="tab" data-cat="research">Research</button><button class="tab" data-cat="ai">AI & Technology</button>
+</div>
+<section class="composer panel">
+ <div class="composer-top"><div class="avatar composer-avatar"></div><div><b>Share with GLOBAL</b><div class="muted small">What are you building, solving or learning?</div></div></div>
+ <textarea id="postText" placeholder="Share an idea, problem, project update, research or opportunity…"></textarea>
+ <div id="mediaPreview" class="media-preview"></div>
+ <div class="composer-row">
+  <div class="composer-tools"><label class="tool-btn">▧ Photo<input id="photoInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label><label class="tool-btn">▣ Video<input id="videoInput" type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime,video/x-m4v" hidden></label><select id="postCategory" class="category-select"><option value="general">General</option><option value="ideas">Ideas</option><option value="problems">Problems</option><option value="projects">Projects</option><option value="opportunities">Opportunities</option><option value="research">Research</option><option value="ai">AI & Technology</option></select></div>
+  <button class="btn primary" id="publishBtn">Publish</button>
+ </div>
+ <div id="publishStatus" class="muted small"></div>
+</section>
+<div id="feed"></div>`;
+
+let selectedFile=null, selectedKind=null, currentCategory='all';
+const $=id=>document.getElementById(id);
+function previewFile(file,kind){selectedFile=file;selectedKind=kind;const p=$('mediaPreview');p.innerHTML='';if(!file)return;const url=URL.createObjectURL(file);p.innerHTML=kind==='photo'?`<div class="preview-wrap"><img src="${url}" alt="Selected photo"><button class="preview-remove" onclick="clearMedia()">×</button></div>`:`<div class="preview-wrap"><video src="${url}" controls></video><button class="preview-remove" onclick="clearMedia()">×</button></div>`;}
+function clearMedia(){selectedFile=null;selectedKind=null;$('photoInput').value='';$('videoInput').value='';$('mediaPreview').innerHTML='';}
+$('photoInput').onchange=e=>{if(e.target.files[0])previewFile(e.target.files[0],'photo')};
+$('videoInput').onchange=e=>{if(e.target.files[0])previewFile(e.target.files[0],'video')};
+async function fileToBase64(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)})}
+$('publishBtn').onclick=async()=>{const a=GLOBAL.account();if(!a)return location.href='login.html';const text=$('postText').value.trim();if(!text&&!selectedFile){$('publishStatus').textContent='Write something or choose a photo/video.';return}if(selectedFile&&(selectedKind==='photo'&&selectedFile.size>5*1024*1024||selectedKind==='video'&&selectedFile.size>20*1024*1024)){ $('publishStatus').textContent=selectedKind==='photo'?'Photo limit: 5MB.':'Video limit: 20MB.';return }
+ $('publishBtn').disabled=true;$('publishStatus').textContent='Publishing…';try{const payload={authorId:a.userId||a.id,authorName:a.fullName||a.username||'GLOBAL Builder',authorAvatar:a.avatar||null,username:a.username||'builder',text,category:$('postCategory').value};if(selectedFile){const b64=await fileToBase64(selectedFile);if(selectedKind==='photo')payload.imageBase64=b64;else payload.videoBase64=b64}const r=await fetch('/api/posts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const d=await r.json();if(!r.ok)throw new Error(d.error||'Could not publish.');$('postText').value='';clearMedia();$('publishStatus').textContent='Published to GLOBAL.';loadFeed('feed',currentCategory);setTimeout(()=>{$('publishStatus').textContent=''},1800)}catch(e){$('publishStatus').textContent='Could not publish. Please try again.'}finally{$('publishBtn').disabled=false}};
+$('feedTabs').onclick=e=>{const b=e.target.closest('[data-cat]');if(!b)return;document.querySelectorAll('#feedTabs .tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');currentCategory=b.dataset.cat;loadFeed('feed',currentCategory)};
+loadFeed('feed','all');GLOBAL.footer();
+</script></body></html>

@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Opportunities</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">OPPORTUNITIES</span>
+    <h1>Opportunities</h1>
+    <p class="muted">Jobs, funding, grants, fellowships and support for builders.</p>
+  </div>
+  <button class="btn primary" id="openCreate">Post opportunity</button>
+</div>
+
+<div id="verifyBanner" class="card panel" style="margin-top:14px;display:none;text-align:center;padding:16px;"></div>
+
+<div class="tabs panel" id="oppTabs">
+  <button class="tab active" data-filter="all">All</button>
+  <button class="tab" data-filter="Job">Jobs</button>
+  <button class="tab" data-filter="Funding">Funding</button>
+  <button class="tab" data-filter="Grant">Grants</button>
+  <button class="tab" data-filter="Fellowship">Fellowships</button>
+  <button class="tab" data-filter="Other">Other</button>
+</div>
+
+<div id="createPanel" class="card panel" style="margin-top:14px;display:none">
+  <h3 style="margin:0 0 12px">Post an opportunity</h3>
+  <input id="oppTitle" placeholder="Title" style="width:100%;margin-bottom:10px">
+  <input id="oppOrg" placeholder="Organization / Company" style="width:100%;margin-bottom:10px">
+  <textarea id="oppDesc" placeholder="Description, requirements, how to apply..." rows="4" style="width:100%;margin-bottom:10px"></textarea>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+    <select id="oppType">
+      <option value="Job">Job</option>
+      <option value="Funding">Funding</option>
+      <option value="Grant">Grant</option>
+      <option value="Fellowship">Fellowship</option>
+      <option value="Internship">Internship</option>
+      <option value="Other">Other</option>
+    </select>
+    <input id="oppLocation" placeholder="Location (or Remote)" style="flex:1;min-width:140px">
+    <input id="oppDeadline" type="date" style="min-width:140px">
+    <input id="oppLink" placeholder="Application link (optional)" style="flex:1;min-width:180px">
+  </div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="btn primary" id="submitOpp">Publish</button>
+    <button class="btn" id="cancelCreate">Cancel</button>
+    <span id="oppStatus" class="muted"></span>
+  </div>
+</div>
+
+<div id="featurePanel" class="card panel" style="margin-top:14px;display:none">
+  <h3 style="margin:0 0 12px">Feature this listing</h3>
+  <p class="muted" style="margin:0 0 10px">Featured listings are pinned to the top of Opportunities.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+    <select id="featureDays">
+      <option value="7">7 days — &#8358;5,000</option>
+      <option value="30">30 days — &#8358;15,000</option>
+    </select>
+    <input id="featureEmail" type="email" placeholder="Email for payment receipt" style="flex:1;min-width:200px">
+  </div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="btn primary" id="payFeature">Pay with Paystack</button>
+    <button class="btn" id="cancelFeature">Cancel</button>
+    <span id="featureStatus" class="muted"></span>
+  </div>
+</div>
+
+<div id="oppList" class="card panel" style="margin-top:14px">
+  <p class="muted" style="padding:20px;text-align:center">Loading opportunities&hellip;</p>
+</div>
+`;
+
+GLOBAL.footer();
+
+const $ = id => document.getElementById(id);
+let currentFilter = 'all';
+let featureTargetId = null;
+
+function formatDate(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString();
+  } catch { return ''; }
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function isCurrentlyFeatured(o) {
+  return !!(o.featured && o.featuredUntil && new Date(o.featuredUntil).getTime() > Date.now());
+}
+
+async function loadOpps() {
+  const list = $('oppList');
+  list.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Loading&hellip;</p>';
+  try {
+    const r = await fetch('/api/opportunities');
+    const d = await r.json();
+    let items = d.opportunities || [];
+    if (currentFilter !== 'all') {
+      items = items.filter(o => (o.type || '') === currentFilter);
+    }
+    if (!items.length) {
+      list.innerHTML = `<div style="padding:32px;text-align:center">
+        <p class="muted">No opportunities yet.</p>
+        <button class="btn primary" style="margin-top:12px" onclick="document.getElementById('openCreate').click()">Post the first one</button>
+      </div>`;
+      return;
+    }
+    list.innerHTML = '<div class="list">' + items.map(o => {
+      const featured = isCurrentlyFeatured(o);
+      const isOwner = a && (o.submittedBy === (a.userId || a.id));
+      return `
+      <div class="list-item" style="${featured ? 'border:1px solid rgba(108,99,255,0.4);background:rgba(108,99,255,0.06);' : ''}">
+        ${featured ? '<span class="badge" style="background:#6c63ff;color:#fff;">FEATURED</span> ' : ''}
+        <span class="badge">${escapeHtml(o.type || 'Other')}</span>
+        <h3 style="margin:8px 0 4px">${escapeHtml(o.title)}</h3>
+        <p class="muted" style="margin:0 0 4px"><strong>${escapeHtml(o.organization || '')}</strong> &middot; ${escapeHtml(o.location || 'Remote / Global')}</p>
+        <p class="muted" style="margin:0 0 8px">${escapeHtml(o.description)}</p>
+        <div class="muted" style="font-size:12px">
+          ${o.deadline ? 'Deadline: ' + formatDate(o.deadline) + ' &middot; ' : ''}
+          ${o.link ? `<a href="${escapeHtml(o.link)}" target="_blank" rel="noopener" style="color:var(--cyan)">Apply / Learn more</a>` : ''}
+        </div>
+        ${isOwner && !featured ? `<button class="btn" style="margin-top:10px" onclick="openFeaturePanel('${escapeHtml(o.id)}')">Feature this listing</button>` : ''}
+      </div>
+    `;
+    }).join('') + '</div>';
+  } catch (e) {
+    list.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Could not load opportunities.</p>';
+  }
+}
+
+$('openCreate').onclick = () => {
+  if (!a) return location.href = 'login.html';
+  $('createPanel').style.display = 'block';
+  $('oppTitle').focus();
+};
+$('cancelCreate').onclick = () => { $('createPanel').style.display = 'none'; $('oppStatus').textContent = ''; };
+$('submitOpp').onclick = async () => {
+  const title = $('oppTitle').value.trim();
+  const description = $('oppDesc').value.trim();
+  if (!title || !description) { $('oppStatus').textContent = 'Title and description required.'; return; }
+  $('submitOpp').disabled = true;
+  $('oppStatus').textContent = 'Publishing&hellip;';
+  try {
+    const r = await fetch('/api/opportunities', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        title, description,
+        organization: $('oppOrg').value.trim(),
+        type: $('oppType').value,
+        location: $('oppLocation').value.trim() || 'Remote / Global',
+        deadline: $('oppDeadline').value || null,
+        link: $('oppLink').value.trim() || null,
+        submittedBy: a.userId || a.id
+      })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed');
+    $('oppTitle').value = ''; $('oppOrg').value = ''; $('oppDesc').value = '';
+    $('oppLocation').value = ''; $('oppLink').value = '';
+    $('createPanel').style.display = 'none';
+    loadOpps();
+  } catch (e) {
+    $('oppStatus').textContent = 'Could not publish.';
+  } finally {
+    $('submitOpp').disabled = false;
+  }
+};
+
+$('oppTabs').onclick = e => {
+  const btn = e.target.closest('[data-filter]');
+  if (!btn) return;
+  document.querySelectorAll('#oppTabs .tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = btn.dataset.filter;
+  loadOpps();
+};
+
+// ---- Featured Opportunities payment flow ----
+window.openFeaturePanel = function (opportunityId) {
+  featureTargetId = opportunityId;
+  $('featurePanel').style.display = 'block';
+  $('featureEmail').value = (a && a.email) || '';
+  $('featurePanel').scrollIntoView({ behavior: 'smooth' });
+};
+
+$('cancelFeature').onclick = () => {
+  $('featurePanel').style.display = 'none';
+  featureTargetId = null;
+  $('featureStatus').textContent = '';
+};
+
+$('payFeature').onclick = async () => {
+  const email = $('featureEmail').value.trim();
+  const days = $('featureDays').value;
+  if (!email || !featureTargetId) { $('featureStatus').textContent = 'Email is required.'; return; }
+
+  $('payFeature').disabled = true;
+  $('featureStatus').textContent = 'Starting payment&hellip;';
+
+  try {
+    const r = await fetch('/api/payments/initialize-feature', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ opportunityId: featureTargetId, email, days })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.success) {
+      $('featureStatus').textContent = d.error || 'Could not start payment.';
+      $('payFeature').disabled = false;
+      return;
+    }
+    window.location.href = d.authorizationUrl;
+  } catch (e) {
+    $('featureStatus').textContent = 'Could not start payment right now.';
+    $('payFeature').disabled = false;
+  }
+};
+
+// ---- After returning from Paystack ----
+async function checkPaymentReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const reference = params.get('reference') || params.get('trxref');
+  if (!reference) return;
+
+  const banner = $('verifyBanner');
+  banner.style.display = 'block';
+  banner.innerHTML = '<p class="muted">Confirming your payment&hellip;</p>';
+
+  try {
+    const r = await fetch('/api/payments/verify/' + encodeURIComponent(reference));
+    const d = await r.json();
+    if (r.ok && d.success) {
+      banner.innerHTML = '<p style="color:#7CFFB2">Payment confirmed — your listing is now Featured.</p>';
+    } else {
+      banner.innerHTML = '<p class="muted">' + escapeHtml(d.error || 'Could not confirm payment.') + '</p>';
+    }
+  } catch (e) {
+    banner.innerHTML = '<p class="muted">Could not confirm payment right now.</p>';
+  }
+
+  // Clean the reference out of the URL so refreshing doesn't re-check it
+  window.history.replaceState({}, '', window.location.pathname);
+}
+
+checkPaymentReturn();
+loadOpps();
+</script>
+</body>
+</html>

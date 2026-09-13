@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Admin / CEO Dashboard</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+if (!a) {
+  app.innerHTML = `<div class="section-title"><div><h1>Admin Dashboard</h1><p class="muted">Please log in.</p></div></div>
+  <div class="card panel"><a class="btn primary" href="login.html">Log in</a></div>`;
+  GLOBAL.footer();
+} else if (!a.isAdmin && a.role !== 'CEO' && a.role !== 'Founder' && a.username !== 'ceo' && a.username !== 'founder') {
+  app.innerHTML = `<div class="section-title"><div><h1>Admin Dashboard</h1><p class="muted">Access restricted to Founder, CEO and admins.</p></div></div>
+  <div class="card panel"><p class="muted">Signed in as ${esc(a.fullName || a.username)}. Contact the Founder or CEO if you need access.</p>
+  <a class="btn" href="index.html">Home</a></div>`;
+  GLOBAL.footer();
+} else {
+  app.innerHTML = `
+  <div class="section-title">
+    <div>
+      <span class="eyebrow">LEADERSHIP</span>
+      <h1>Admin / CEO Dashboard</h1>
+      <p class="muted">Welcome, ${esc(a.fullName || a.username)}${a.role ? ' · ' + esc(a.role) : ''}</p>
+    </div>
+    <button class="btn" id="refreshBtn">Refresh stats</button>
+  </div>
+  <div id="stats" class="card panel" style="margin-top:14px"><p class="muted">Loading…</p></div>
+  <div class="card panel" style="margin-top:14px">
+    <h3 style="margin-top:0">Quick actions</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:10px">
+      <a class="btn primary" href="moderation.html">Moderation / Reports</a>
+      <a class="btn" href="opportunities.html">Opportunities</a>
+      <a class="btn" href="people.html">People</a>
+      <a class="btn" href="problems.html">Problems</a>
+      <a class="btn" href="projects.html">Projects</a>
+      <a class="btn" href="settings.html">Settings</a>
+    </div>
+  </div>
+  <div class="card panel" style="margin-top:14px">
+    <h3 style="margin-top:0">Platform health</h3>
+    <div id="health" class="muted">Checking…</div>
+  </div>
+  <div class="card panel" style="margin-top:14px">
+    <h3 style="margin-top:0">Leadership</h3>
+    <p class="muted" style="margin:0"><strong>Founder</strong> — Maridiyat Salaudeen · +234 905 510 1337</p>
+    <p class="muted" style="margin:8px 0 0"><strong>CEO</strong> — Sultanic the iconic · hassansultoon826@gmail.com</p>
+  </div>
+  `;
+  GLOBAL.footer();
+
+  async function load() {
+    try {
+      const r = await fetch('/api/status');
+      const d = await r.json();
+      const s = d.stats || {};
+      const services = d.services || {};
+      document.getElementById('stats').innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px">
+          <div><div class="muted" style="font-size:12px">Users</div><strong style="font-size:22px">${s.users||0}</strong></div>
+          <div><div class="muted" style="font-size:12px">Problems</div><strong style="font-size:22px">${s.problems||0}</strong></div>
+          <div><div class="muted" style="font-size:12px">Ideas</div><strong style="font-size:22px">${s.ideas||0}</strong></div>
+          <div><div class="muted" style="font-size:12px">Projects</div><strong style="font-size:22px">${s.projects||0}</strong></div>
+          <div><div class="muted" style="font-size:12px">Opportunities</div><strong style="font-size:22px">${s.opportunities||0}</strong></div>
+          <div><div class="muted" style="font-size:12px">Teams</div><strong style="font-size:22px">${s.teams||0}</strong></div>
+          <div><div class="muted" style="font-size:12px">Posts</div><strong style="font-size:22px">${s.posts||0}</strong></div>
+        </div>`;
+      document.getElementById('health').innerHTML = `
+        <p style="margin:0 0 8px">API: <strong>${esc(d.status)}</strong> · v${esc(d.version)}</p>
+        <p style="margin:0">AI: ${esc(services.ai)} · News: ${esc(services.news)} · Payments: ${esc(services.payments)} · DB: ${esc(services.database || 'json')}</p>`;
+    } catch (e) {
+      document.getElementById('stats').innerHTML = '<p class="muted">Could not load stats. Is the server running?</p>';
+    }
+  }
+  document.getElementById('refreshBtn').onclick = load;
+  load();
+}
+</script>
+</body>
+</html>

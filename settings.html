@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#070b12">
+<title>GLOBAL — Settings</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<script src="assets/app.js"></script>
+<script>
+GLOBAL.shell();
+const app = document.getElementById('app');
+const a = GLOBAL.account();
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+app.innerHTML = `
+<div class="section-title">
+  <div>
+    <span class="eyebrow">ACCOUNT</span>
+    <h1>Settings</h1>
+    <p class="muted">Profile, privacy, legal and admin tools.</p>
+  </div>
+</div>
+${a ? `
+<div class="card panel" style="margin-top:14px">
+  <h3 style="margin-top:0">Profile photo</h3>
+  <p class="muted" style="font-size:13px">PNG, JPG, GIF or WEBP · max 5MB. Stored as a real file on the server.</p>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:10px">
+    <img id="avPreview" src="${esc(a.avatar || '')}" alt="" style="width:72px;height:72px;border-radius:50%;object-fit:cover;background:#1a2230;${a.avatar ? '' : 'display:none'}">
+    <div id="avPlaceholder" style="width:72px;height:72px;border-radius:50%;background:#1a2230;display:${a.avatar ? 'none' : 'flex'};align-items:center;justify-content:center;color:#8899aa;font-size:24px">${esc((a.fullName||a.username||'?')[0]||'?')}</div>
+    <div>
+      <input type="file" id="avFile" accept="image/png,image/jpeg,image/jpg,image/gif,image/webp" style="display:none">
+      <button class="btn primary" id="avBtn">Upload photo</button>
+      <button class="btn" id="avRemove" style="margin-left:8px">Remove</button>
+      <p id="avStatus" class="muted" style="font-size:13px;margin:8px 0 0"></p>
+    </div>
+  </div>
+</div>
+<div class="card panel" style="margin-top:14px">
+  <h3 style="margin-top:0">Account</h3>
+  <p><strong>${esc(a.fullName || a.username)}</strong> · @${esc(a.username)}</p>
+  <p class="muted" style="font-size:13px">${esc(a.email || '')}${a.phone ? ' · ' + esc(a.phone) : ''}${a.role ? ' · ' + esc(a.role) : ''}</p>
+  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+    <a class="btn primary" href="profile.html">Edit profile</a>
+    <button class="btn" id="logoutBtn" style="color:#ff8490">Log out</button>
+  </div>
+</div>
+${(a.isAdmin || a.role === 'CEO' || a.role === 'Founder' || a.username === 'ceo' || a.username === 'founder') ? `
+<div class="card panel" style="margin-top:14px">
+  <h3 style="margin-top:0">Admin / CEO</h3>
+  <p class="muted" style="font-size:13px">Leadership tools for running GLOBAL.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+    <a class="btn primary" href="admin.html">Admin dashboard</a>
+    <a class="btn" href="moderation.html">Moderation</a>
+  </div>
+</div>` : ''}
+<div class="card panel" style="margin-top:14px">
+  <h3 style="margin-top:0">Privacy &amp; policy</h3>
+  <div class="focus-list">
+    <a href="privacy.html"><b>Privacy policy</b><span>How we handle your data and photos</span></a>
+    <a href="policy.html"><b>Terms of use</b><span>Rules for using GLOBAL</span></a>
+  </div>
+</div>
+<div class="card panel" style="margin-top:14px">
+  <h3 style="margin-top:0">Build on GLOBAL</h3>
+  <div class="focus-list">
+    <a href="problems.html"><b>Problems</b><span>Report real issues</span></a>
+    <a href="ideas.html"><b>Ideas</b><span>Share solutions</span></a>
+    <a href="projects.html"><b>Projects</b><span>Build in public</span></a>
+    <a href="opportunities.html"><b>Opportunities</b><span>Jobs and funding</span></a>
+    <a href="global-ai.html"><b>GLOBAL AI</b><span>Ask the assistant</span></a>
+  </div>
+</div>
+` : `
+<div class="card panel" style="margin-top:14px">
+  <p class="muted">Please <a href="login.html">log in</a> or <a href="create-account.html">create an account</a>.</p>
+  <div class="focus-list" style="margin-top:16px">
+    <a href="privacy.html"><b>Privacy policy</b><span>How we handle data</span></a>
+    <a href="policy.html"><b>Terms of use</b><span>Rules for using GLOBAL</span></a>
+  </div>
+</div>
+`}
+`;
+GLOBAL.footer();
+
+if (a) {
+  const $ = id => document.getElementById(id);
+  $('logoutBtn').onclick = () => {
+    localStorage.removeItem('global_current_account');
+    localStorage.removeItem('global_logged_in');
+    location.href = 'login.html';
+  };
+  $('avBtn').onclick = () => $('avFile').click();
+  $('avFile').onchange = async () => {
+    const file = $('avFile').files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      $('avStatus').textContent = 'Image too large. Max 5MB.';
+      return;
+    }
+    $('avStatus').textContent = 'Uploading…';
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const res = await fetch('/api/user/' + a.userId + '/avatar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: reader.result })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          $('avStatus').textContent = data.error || 'Upload failed';
+          return;
+        }
+        const img = $('avPreview');
+        img.src = data.user.avatar;
+        img.style.display = 'block';
+        $('avPlaceholder').style.display = 'none';
+        const stored = JSON.parse(localStorage.getItem('global_current_account') || '{}');
+        stored.avatar = data.user.avatar;
+        localStorage.setItem('global_current_account', JSON.stringify(stored));
+        $('avStatus').textContent = 'Photo updated.';
+      } catch (e) {
+        $('avStatus').textContent = 'Could not upload. Try again.';
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+  $('avRemove').onclick = async () => {
+    try {
+      const res = await fetch('/api/user/' + a.userId + '/avatar', { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok) {
+        $('avPreview').style.display = 'none';
+        $('avPlaceholder').style.display = 'flex';
+        const stored = JSON.parse(localStorage.getItem('global_current_account') || '{}');
+        stored.avatar = null;
+        localStorage.setItem('global_current_account', JSON.stringify(stored));
+        $('avStatus').textContent = 'Photo removed.';
+      }
+    } catch (e) {
+      $('avStatus').textContent = 'Could not remove.';
+    }
+  };
+}
+</script>
+</body>
+</html>
