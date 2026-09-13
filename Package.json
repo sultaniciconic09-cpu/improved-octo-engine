@@ -1,0 +1,21 @@
+{
+  "name": "global-organisation",
+  "version": "4.2.2",
+  "description": "GLOBAL Organisation — From Nigeria, building solutions for Africa and the world",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "pg": "^8.13.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.0.0"
+  }
+}
